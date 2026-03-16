@@ -1,0 +1,49 @@
+# ──────────────────────────────────────────
+# .gitignore
+# ──────────────────────────────────────────
+
+# ENV Passkeys
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Virtual environment folders
+venv/
+env/
+.venv/
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Delta Lake and Spark output files
+pipeline/bronze/data/
+pipeline/silver/data/
+pipeline/gold/data/
+*.parquet
+*.delta
+*.csv
+*.xlsx
+
+# dbt
+dbt/target/
+dbt/logs/
+dbt/.user.yml
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE settings
+.vscode/
+.idea/
