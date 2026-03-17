@@ -45,7 +45,7 @@ services:
   #   daily_flight_events, hist_flight_events
   # ──────────────────────────────────────────
   postgres:
-    image: postgres:15
+    image: postgis/postgis:15-3.4
     container_name: postgres
     ports:
       - "5432:5432"
