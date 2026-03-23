@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS dim_aircraft (
     -- The 3-letter ICAO airline code.
     operatorcallsign    TEXT,
     airline_icao        TEXT,
-    airline_iata        VARCHAR(5),
+    airline_iata        VARCHAR(10),
 
     -- The country code where this aircraft is registered.
     -- Example: "NG", "AE"

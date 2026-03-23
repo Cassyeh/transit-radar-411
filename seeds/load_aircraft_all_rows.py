@@ -329,6 +329,21 @@ def map_row(row, prefix_to_iso2, iso2_to_name):
 
     # Helper to clean string values — converts "nan" to None
     def clean(val):
+        if (val == "icaoaircrafttype"):
+            # for aircrafttype > 10 chars
+            text = str(row.get(val, "")).strip()
+            if len(text) > 10 and "BOEING ICAO Manufacturer Code" in text:
+                if "(" in text and ")" in text:
+                    extracted = text.split("(")[-1].split(")")[0]
+                    s = extracted
+                    return s if s and s.lower() not in ("nan", "none") else None
+        if (val == "operatoriata"):
+            # for operatoriata > 10 chars
+            text = str(row.get(val, "")).strip()
+            if len(text) > 10 and "SWA	 Airline IATA" in text:
+                s = "WN"
+                print(s)
+                return s if s and s.lower() not in ("nan", "none") else None
         s = str(row.get(val, "")).strip()
         return s if s and s.lower() not in ("nan", "none") else None
 
@@ -383,11 +398,17 @@ def load_chunk(rows, conn, chunk_number):
         if val and len(str(val)) > 2:
             print(f"  VIOLATION at row {i}: country_iso2={repr(val)} full row={row}")
             break
-    
+
+    for i, row in enumerate(rows):
+        val = row[5]  # position 6 = icao_aircraft_type (0-indexed = 5)
+        if val and len(str(val)) > 10:
+            print(f"  VIOLATION at row {i}: icao_aircraft_type={repr(val)} full row={row}")
+            break
+
     for i, row in enumerate(rows):
         val = row[9]  # position 10 = airline_iata (0-indexed = 9)
-        if val and len(str(val)) > 5:
-            print(f"  VIOLATION at row {i}: country_iso2={repr(val)} full row={row}")
+        if val and len(str(val)) > 10:
+            print(f"  VIOLATION at row {i}: airline_iata={repr(val)} full row={row}")
             break
 
     cursor = conn.cursor()
@@ -444,6 +465,7 @@ def verify(conn):
     count = cursor.fetchone()[0]
     cursor.close()
     print(f"  dim_aircraft total rows: {count:,}")
+    return(count)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -469,8 +491,9 @@ def main():
     df = pd.read_csv(OPENSKY_AIRCRAFT_FILE)
     df.columns = [c.lower().strip() for c in df.columns]
     print(f"  Downloaded {len(df):,} rows.")
+    print(f"  Unique icao24 aircraft codes: {df['icao24'].nunique():,}")
 
-    # Step 3 — Map all rows at once
+    #Step 3 — Map all rows at once
     print(f"\n[Step 3/4] Mapping all rows...")
     rows = []
     skipped = 0
@@ -489,8 +512,9 @@ def main():
     print(f"  Inserted {inserted:,} rows.")
 
     # Verify
-    verify(conn)
+    total_rows_in_table = verify(conn)
     conn.close()
+    print(f"  Total rows skipped  : {len(df) - total_rows_in_table:,} (missing icao24)")
     print("\nload_aircraft.py complete. dim_aircraft is ready.")
     print("Next: run seeds/load_airports.py")
 
