@@ -2,6 +2,12 @@
 # .gitignore
 # ──────────────────────────────────────────
 
+#location and binary files
+seeds/*.shp
+seeds/*.shx
+seeds/*.dbf
+seeds/*.prj
+
 # ENV Passkeys
 .env
 
