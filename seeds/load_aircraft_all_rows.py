@@ -342,7 +342,6 @@ def map_row(row, prefix_to_iso2, iso2_to_name):
             text = str(row.get(val, "")).strip()
             if len(text) > 10 and "SWA	 Airline IATA" in text:
                 s = "WN"
-                print(s)
                 return s if s and s.lower() not in ("nan", "none") else None
         s = str(row.get(val, "")).strip()
         return s if s and s.lower() not in ("nan", "none") else None

@@ -15,6 +15,8 @@
 -- which country or territory an airport sits inside.
 --
 -- PRIMARY KEY
+-- ---------
+-- ident
 -- -----------
 -- airport_iata_code — the 3-letter IATA code assigned to
 -- every commercial airport in the world.
@@ -38,7 +40,6 @@
 
 
 CREATE TABLE IF NOT EXISTS dim_airport (
-
     -- ── Internal surrogate key ──────────────────────────────
     airport_id          SERIAL PRIMARY KEY,
 
@@ -46,7 +47,7 @@ CREATE TABLE IF NOT EXISTS dim_airport (
     -- The unique identifier assigned by OurAirports to every
     -- airport in their database. 
     -- Example: "AAD" for Adado Airport
-    ident               VARCHAR(10),
+    ident          VARCHAR(10) UNIQUE,
 
     -- ── Primary business keys ────────────────────────────────
     -- The 3-letter IATA code. 
@@ -94,7 +95,7 @@ CREATE TABLE IF NOT EXISTS dim_airport (
     -- ── Coordinates ──────────────────────────────────────────
     -- GPS latitude in decimal degrees.
     -- Positive = North, Negative = South
-    latitude_deg        NUMERIC(9, 6),
+    latitude_deg        NUMERIC(9, 6), --- 3 digits before decimal, 6 digits after decimal, range for latitude is -90 to +90
 
     -- GPS longitude in decimal degrees.
     -- Positive = East, Negative = West
@@ -111,6 +112,9 @@ CREATE TABLE IF NOT EXISTS dim_airport (
 -- ============================================================
 
 -- Primary join column — every flight event references this
+CREATE INDEX IF NOT EXISTS idx_dim_airport_indent
+    ON dim_airport(indent);
+
 CREATE INDEX IF NOT EXISTS idx_dim_airport_iata
     ON dim_airport(airport_iata_code);
 
