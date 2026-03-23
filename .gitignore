@@ -13,6 +13,7 @@ __pycache__/
 dist/
 build/
 *.egg
+count_rows_csv.py
 
 # Virtual environment folders
 venv/

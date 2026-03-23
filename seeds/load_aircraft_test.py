@@ -80,6 +80,7 @@ OPENSKY_AIRCRAFT_URL = (
 SEEDS_DIR           = os.path.dirname(__file__)
 REG_PREFIXES_FILE   = os.path.join(SEEDS_DIR, "aircraft_reg-prefixes.csv")
 COUNTRIES_FILE      = os.path.join(SEEDS_DIR, "countries_code.csv")
+OPENSKY_AIRCRAFT_FILE = os.path.join(SEEDS_DIR,"aircraftDatabase.csv")
 
 # How many rows to process and insert in each batch
 CHUNK_SIZE = 10_000
@@ -148,17 +149,19 @@ def build_country_lookups():
 
     # Read registration prefix to ISO2 mapping
     # Columns in file: Prefix, CountryISO2
-    reg_df = pd.read_csv(REG_PREFIXES_FILE)
+    # Read registration prefix to ISO2 mapping
+    reg_df = pd.read_csv(REG_PREFIXES_FILE, keep_default_na=False) #Pandas to treat 'NA' as string not NaN
     reg_df.columns = [c.strip() for c in reg_df.columns]
     prefix_to_iso2 = dict(zip(
         reg_df["Prefix"].astype(str).str.strip(),
         reg_df["CountryISO2"].astype(str).str.strip()
     ))
+    #print(prefix_to_iso2)
     print(f"  Loaded {len(prefix_to_iso2):,} registration prefixes.")
 
     # Read ISO2 to country name mapping
     # Columns in file: ISO, Name
-    countries_df = pd.read_csv(COUNTRIES_FILE)
+    countries_df = pd.read_csv(COUNTRIES_FILE, keep_default_na=False) #Pandas to treat 'NA' as string not NaN
     countries_df.columns = [c.strip() for c in countries_df.columns]
     iso2_to_name = dict(zip(
         countries_df["ISO"].astype(str).str.strip(),
@@ -203,6 +206,16 @@ def get_country_from_registration(registration, prefix_to_iso2, iso2_to_name):
         return None, None
 
     country_iso2 = prefix_to_iso2[prefix]
+    # if registration == 'V5-ANF':
+    #     print("Country_iso2 is: ", country_iso2)
+    #     print(prefix)
+    # Safety check — if the lookup returned 'nan' treat it as None
+    if not country_iso2 or str(country_iso2).lower() in ("nan", "none", ""):
+        country_iso2 = None
+
+    # Safety check — iso2 must be exactly 2 characters
+    if len(str(country_iso2).strip()) > 2:
+        country_iso2 = None
 
     # ── TEMPORARY DEBUG ──────────────────────────────────────
     #print(f"  DEBUG: prefix={prefix} country_iso2={country_iso2} type={type(country_iso2)} len={len(str(country_iso2))}")
@@ -282,6 +295,12 @@ def map_row(row, prefix_to_iso2, iso2_to_name):
     Returns None if the row has no icao24 — we cannot insert
     a row without the primary business key.
     """
+    # Get icao24 first — if missing or nan, skip this row entirely
+    raw_icao24 = row.get("icao24", "")
+    if pd.isna(raw_icao24):
+        return None
+    
+    icao24 = str(raw_icao24).strip().lower()
     # ── FIX 1: treat "nan" as missing ────────────────────────
     if not icao24 or icao24 == "nan":
         return None
@@ -316,7 +335,7 @@ def map_row(row, prefix_to_iso2, iso2_to_name):
     return (
         icao24,
         registration,
-        clean("manufacturer"),
+        clean("manufacturername"),
         clean("model"),
         clean("typecode"),
         clean("icaoaircrafttype"),
@@ -329,7 +348,6 @@ def map_row(row, prefix_to_iso2, iso2_to_name):
         first_flight_date,
         clean("engines"),
         clean("categoryDescription"),
-        clean("status"),
         True
     )
 
@@ -354,10 +372,26 @@ def load_chunk(rows, conn, chunk_number):
         return 0
     
     # ── TEMPORARY DEBUG ──────────────────────────────────────
-    if chunk_number == 1:
-        print(f"  DEBUG first row: {rows[0]}")
+    # if chunk_number == 1:
+    #     print(f"  DEBUG first row: {rows[0]}")
+        # row = rows[0]
+        # for i, val in enumerate(row, 1):
+        #     print(f"  Position {i:>2}: {repr(val)}")
+    
+    for i, row in enumerate(rows):
+        val = row[10]  # position 11 = country_iso2 (0-indexed = 10)
+        if val and len(str(val)) > 2:
+            print(f"  VIOLATION at row {i}: country_iso2={repr(val)} full row={row}")
+            break
+    
+    for i, row in enumerate(rows):
+        val = row[9]  # position 10 = airline_iata (0-indexed = 9)
+        if val and len(str(val)) > 5:
+            print(f"  VIOLATION at row {i}: country_iso2={repr(val)} full row={row}")
+            break
 
     cursor = conn.cursor()
+    print("Connected to DB successfully")
     try:
         execute_values(
             cursor,
@@ -427,96 +461,38 @@ def main():
     # Connect to PostgreSQL
     conn = get_connection()
 
-    # Step 2 — Connect to OpenSky download stream
-    response = download_opensky_aircraft()
+    # Step 2 — Download entire CSV at once into pandas
+    print(f"\n[Step 2/4] Downloading OpenSky aircraft database...")
+    #print(f"  URL: {OPENSKY_AIRCRAFT_URL}")
+    print(f"  Downloading entire file into memory...")
 
-    # Step 3 and 4 — Read stream, map columns, insert in chunks
-    print(f"\n[Step 3/4] Processing and inserting...")
+    df = pd.read_csv(OPENSKY_AIRCRAFT_FILE)
+    df.columns = [c.lower().strip() for c in df.columns]
+    print(f"  Downloaded {len(df):,} rows.")
 
-    chunk_number   = 0
-    total_inserted = 0
-    total_skipped  = 0
-    line_buffer    = []
-    header         = None
+    # Step 3 — Map all rows at once
+    print(f"\n[Step 3/4] Mapping all rows...")
+    rows = []
+    skipped = 0
+    for _, row in df.iterrows():
+        mapped = map_row(row, prefix_to_iso2, iso2_to_name)
+        if mapped:
+            rows.append(mapped)
+        else:
+            skipped += 1
 
-    for raw_line in response.iter_lines():
-        line = raw_line.decode("utf-8", errors="replace")
+    print(f"  Mapped {len(rows):,} rows. Skipped {skipped:,}.")
 
-        # First line is always the header
-        if header is None:
-            header = line
-            continue
+    # Step 4 — Insert all at once
+    print(f"\n[Step 4/4] Inserting all rows...")
+    inserted = load_chunk(rows, conn, 1)
+    print(f"  Inserted {inserted:,} rows.")
 
-        line_buffer.append(line)
-
-        # When we have a full chunk, process it
-        if len(line_buffer) >= CHUNK_SIZE:
-            chunk_number += 1
-
-            # Parse lines as a mini CSV with the header prepended
-            chunk_csv = header + "\n" + "\n".join(line_buffer)
-            df = pd.read_csv(
-                StringIO(chunk_csv),
-                low_memory=False,
-                dtype=str
-            )
-            df.columns = [c.lower().strip() for c in df.columns]
-
-            # Map each row and collect valid ones
-            rows = []
-            for _, row in df.iterrows():
-                mapped = map_row(row, prefix_to_iso2, iso2_to_name)
-                if mapped:
-                    rows.append(mapped)
-                else:
-                    total_skipped += 1
-
-            # Bulk insert this chunk
-            inserted = load_chunk(rows, conn, chunk_number)
-            total_inserted += inserted
-
-            print(
-                f"  Chunk {chunk_number:>4} | "
-                f"inserted {inserted:>6,} | "
-                f"total {total_inserted:>8,}"
-            )
-
-            # Clear buffer for next chunk
-            line_buffer = []
-
-    # Process remaining lines that did not fill a full chunk
-    if line_buffer:
-        chunk_number += 1
-        chunk_csv = header + "\n" + "\n".join(line_buffer)
-        df = pd.read_csv(StringIO(chunk_csv), low_memory=False, dtype=str)
-        df.columns = [c.lower().strip() for c in df.columns]
-
-        rows = []
-        for _, row in df.iterrows():
-            mapped = map_row(row, prefix_to_iso2, iso2_to_name)
-            if mapped:
-                rows.append(mapped)
-            else:
-                total_skipped += 1
-
-        inserted = load_chunk(rows, conn, chunk_number)
-        total_inserted += inserted
-        print(
-            f"  Chunk {chunk_number:>4} | "
-            f"inserted {inserted:>6,} | "
-            f"total {total_inserted:>8,}"
-        )
-
-    # Step 4 — Verify
-    print(f"\n[Step 4/4] Verifying...")
-    print(f"  Total rows inserted : {total_inserted:,}")
-    print(f"  Total rows skipped  : {total_skipped:,} (missing icao24)")
+    # Verify
     verify(conn)
-
     conn.close()
     print("\nload_aircraft.py complete. dim_aircraft is ready.")
     print("Next: run seeds/load_airports.py")
-
 
 if __name__ == "__main__":
     main()

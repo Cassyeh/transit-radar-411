@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS dim_aircraft (
     aircraft_id         SERIAL PRIMARY KEY,
 
     -- ── The primary business key ────────────────────────────
-    icao24              VARCHAR(10) UNIQUE NOT NULL,
+    icao24              VARCHAR(10) UNIQUE NOT NULL, ---reject any attempt to insert a duplicate icao24
 
     -- ── Aircraft identity ───────────────────────────────────
     -- The tail number painted on the outside of the aircraft.
