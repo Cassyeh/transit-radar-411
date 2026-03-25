@@ -51,6 +51,22 @@ from datetime import datetime
 from io import StringIO
 from dotenv import load_dotenv
 
+import logging
+import os
+
+# Get current file name without extension
+current_file = os.path.splitext(os.path.basename(__file__))[0]
+
+# Set log filename based on current file
+log_filename = f"{current_file}.log"
+
+# Configure logging
+logging.basicConfig(
+    filename=log_filename,
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
 # ─────────────────────────────────────────────────────────────
 # LOAD ENVIRONMENT VARIABLES
 # Reads  .env file so we do not hardcode passwords.
@@ -99,12 +115,12 @@ def get_connection():
     """
     try:
         conn = psycopg2.connect(**DB_CONFIG)
-        print("  Connected to PostgreSQL successfully.")
+        logging.info("  Connected to PostgreSQL successfully.")
         return conn
     except Exception as e:
-        print(f"  ERROR: Could not connect to PostgreSQL.")
-        print(f"  Details: {e}")
-        print(f"  Make sure docker compose up -d is running.")
+        logging.info(f"  ERROR: Could not connect to PostgreSQL.")
+        logging.info(f"  Details: {e}")
+        logging.info(f"  Make sure docker compose up -d is running.")
         sys.exit(1)
 
 
@@ -130,21 +146,21 @@ def build_country_lookups():
     lookup is almost instant. Searching a CSV file each time
     would take hours.
     """
-    print("\n[Step 1/4] Building country lookup dictionaries...")
+    logging.info("\n[Step 1/4] Building country lookup dictionaries...")
 
     # Validate local files exist before doing anything else
     if not os.path.exists(REG_PREFIXES_FILE):
-        print(f"  ERROR: {REG_PREFIXES_FILE} not found.")
-        print(f"  Download it from:")
-        print(f"  https://raw.githubusercontent.com/vradarserver/standing-data")
-        print(f"  /main/registration-prefixes/schema-01/reg-prefixes.csv")
+        logging.info(f"  ERROR: {REG_PREFIXES_FILE} not found.")
+        logging.info(f"  Download it from:")
+        logging.info(f"  https://raw.githubusercontent.com/vradarserver/standing-data")
+        logging.info(f"  /main/registration-prefixes/schema-01/reg-prefixes.csv")
         sys.exit(1)
 
     if not os.path.exists(COUNTRIES_FILE):
-        print(f"  ERROR: {COUNTRIES_FILE} not found.")
-        print(f"  Download it from:")
-        print(f"  https://raw.githubusercontent.com/vradarserver/standing-data")
-        print(f"  /main/countries/schema-01/countries.csv")
+        logging.info(f"  ERROR: {COUNTRIES_FILE} not found.")
+        logging.info(f"  Download it from:")
+        logging.info(f"  https://raw.githubusercontent.com/vradarserver/standing-data")
+        logging.info(f"  /main/countries/schema-01/countries.csv")
         sys.exit(1)
 
     # Read registration prefix to ISO2 mapping
@@ -156,8 +172,8 @@ def build_country_lookups():
         reg_df["Prefix"].astype(str).str.strip(),
         reg_df["CountryISO2"].astype(str).str.strip()
     ))
-    #print(prefix_to_iso2)
-    print(f"  Loaded {len(prefix_to_iso2):,} registration prefixes.")
+    #logging.info(prefix_to_iso2)
+    logging.info(f"  Loaded {len(prefix_to_iso2):,} registration prefixes.")
 
     # Read ISO2 to country name mapping
     # Columns in file: ISO, Name
@@ -167,7 +183,7 @@ def build_country_lookups():
         countries_df["ISO"].astype(str).str.strip(),
         countries_df["Name"].astype(str).str.strip()
     ))
-    print(f"  Loaded {len(iso2_to_name):,} country names.")
+    logging.info(f"  Loaded {len(iso2_to_name):,} country names.")
 
     return prefix_to_iso2, iso2_to_name
 
@@ -207,8 +223,8 @@ def get_country_from_registration(registration, prefix_to_iso2, iso2_to_name):
 
     country_iso2 = prefix_to_iso2[prefix]
     # if registration == 'V5-ANF':
-    #     print("Country_iso2 is: ", country_iso2)
-    #     print(prefix)
+    #     logging.info("Country_iso2 is: ", country_iso2)
+    #     logging.info(prefix)
     # Safety check — if the lookup returned 'nan' treat it as None
     if not country_iso2 or str(country_iso2).lower() in ("nan", "none", ""):
         country_iso2 = None
@@ -218,7 +234,7 @@ def get_country_from_registration(registration, prefix_to_iso2, iso2_to_name):
         country_iso2 = None
 
     # ── TEMPORARY DEBUG ──────────────────────────────────────
-    #print(f"  DEBUG: prefix={prefix} country_iso2={country_iso2} type={type(country_iso2)} len={len(str(country_iso2))}")
+    #logging.info(f"  DEBUG: prefix={prefix} country_iso2={country_iso2} type={type(country_iso2)} len={len(str(country_iso2))}")
     # ─────────────────────────────────────────────────────────
 
     country_of_reg = iso2_to_name.get(country_iso2)
@@ -240,9 +256,9 @@ def download_opensky_aircraft():
 
     Returns the response object — we iterate over it in main().
     """
-    print(f"\n[Step 2/4] Connecting to OpenSky aircraft database...")
-    print(f"  URL: {OPENSKY_AIRCRAFT_URL}")
-    print(f"  This file is large. Processing will begin shortly...")
+    logging.info(f"\n[Step 2/4] Connecting to OpenSky aircraft database...")
+    logging.info(f"  URL: {OPENSKY_AIRCRAFT_URL}")
+    logging.info(f"  This file is large. Processing will begin shortly...")
 
     try:
         response = requests.get(
@@ -251,13 +267,13 @@ def download_opensky_aircraft():
             timeout=120
         )
         response.raise_for_status()
-        print(f"  Connection established. Processing in chunks of {CHUNK_SIZE:,}...")
+        logging.info(f"  Connection established. Processing in chunks of {CHUNK_SIZE:,}...")
         return response
     except requests.exceptions.Timeout:
-        print("  ERROR: Connection timed out after 2 minutes.")
+        logging.info("  ERROR: Connection timed out after 2 minutes.")
         sys.exit(1)
     except requests.exceptions.RequestException as e:
-        print(f"  ERROR: Download failed: {e}")
+        logging.info(f"  ERROR: Download failed: {e}")
         sys.exit(1)
 
 
@@ -387,31 +403,31 @@ def load_chunk(rows, conn, chunk_number):
     
     # ── TEMPORARY DEBUG ──────────────────────────────────────
     # if chunk_number == 1:
-    #     print(f"  DEBUG first row: {rows[0]}")
+    #     logging.info(f"  DEBUG first row: {rows[0]}")
         # row = rows[0]
         # for i, val in enumerate(row, 1):
-        #     print(f"  Position {i:>2}: {repr(val)}")
+        #     logging.info(f"  Position {i:>2}: {repr(val)}")
     
     for i, row in enumerate(rows):
         val = row[10]  # position 11 = country_iso2 (0-indexed = 10)
         if val and len(str(val)) > 2:
-            print(f"  VIOLATION at row {i}: country_iso2={repr(val)} full row={row}")
+            logging.info(f"  VIOLATION at row {i}: country_iso2={repr(val)} full row={row}")
             break
 
     for i, row in enumerate(rows):
         val = row[5]  # position 6 = icao_aircraft_type (0-indexed = 5)
         if val and len(str(val)) > 10:
-            print(f"  VIOLATION at row {i}: icao_aircraft_type={repr(val)} full row={row}")
+            logging.info(f"  VIOLATION at row {i}: icao_aircraft_type={repr(val)} full row={row}")
             break
 
     for i, row in enumerate(rows):
         val = row[9]  # position 10 = airline_iata (0-indexed = 9)
         if val and len(str(val)) > 10:
-            print(f"  VIOLATION at row {i}: airline_iata={repr(val)} full row={row}")
+            logging.info(f"  VIOLATION at row {i}: airline_iata={repr(val)} full row={row}")
             break
 
     cursor = conn.cursor()
-    print("Connected to DB successfully")
+    logging.info("Connected to DB successfully")
     try:
         execute_values(
             cursor,
@@ -442,8 +458,8 @@ def load_chunk(rows, conn, chunk_number):
         return len(rows)
     except Exception as e:
         conn.rollback()
-        print(f"  ERROR in chunk {chunk_number}: {e}")
-        print(f"  DEBUG row: {rows[0]}")
+        logging.info(f"  ERROR in chunk {chunk_number}: {e}")
+        logging.info(f"  DEBUG row: {rows[0]}")
         return 0
     finally:
         cursor.close()
@@ -463,7 +479,7 @@ def verify(conn):
     cursor.execute("SELECT COUNT(*) FROM dim_aircraft")
     count = cursor.fetchone()[0]
     cursor.close()
-    print(f"  dim_aircraft total rows: {count:,}")
+    logging.info(f"  dim_aircraft total rows: {count:,}")
     return(count)
 
 
@@ -472,9 +488,9 @@ def verify(conn):
 # ─────────────────────────────────────────────────────────────
 
 def main():
-    print("=" * 60)
-    print("  Transit Radar 411 — Aircraft Seed Loader")
-    print("=" * 60)
+    logging.info("=" * 60)
+    logging.info("  Transit Radar 411 — Aircraft Seed Loader")
+    logging.info("=" * 60)
 
     # Step 1 — Build lookup dictionaries
     prefix_to_iso2, iso2_to_name = build_country_lookups()
@@ -483,17 +499,17 @@ def main():
     conn = get_connection()
 
     # Step 2 — Download entire CSV at once into pandas
-    print(f"\n[Step 2/4] Downloading OpenSky aircraft database...")
-    #print(f"  URL: {OPENSKY_AIRCRAFT_URL}")
-    print(f"  Downloading entire file into memory...")
+    logging.info(f"\n[Step 2/4] Downloading OpenSky aircraft database...")
+    #logging.info(f"  URL: {OPENSKY_AIRCRAFT_URL}")
+    logging.info(f"  Downloading entire file into memory...")
 
     df = pd.read_csv(OPENSKY_AIRCRAFT_FILE)
     df.columns = [c.lower().strip() for c in df.columns]
-    print(f"  Downloaded {len(df):,} rows.")
-    print(f"  Unique icao24 aircraft codes: {df['icao24'].nunique():,}")
+    logging.info(f"  Downloaded {len(df):,} rows.")
+    logging.info(f"  Unique icao24 aircraft codes: {df['icao24'].nunique():,}")
 
     #Step 3 — Map all rows at once
-    print(f"\n[Step 3/4] Mapping all rows...")
+    logging.info(f"\n[Step 3/4] Mapping all rows...")
     rows = []
     skipped = 0
     for _, row in df.iterrows():
@@ -503,19 +519,19 @@ def main():
         else:
             skipped += 1
 
-    print(f"  Mapped {len(rows):,} rows. Skipped {skipped:,}.")
+    logging.info(f"  Mapped {len(rows):,} rows. Skipped {skipped:,}.")
 
     # Step 4 — Insert all at once
-    print(f"\n[Step 4/4] Inserting all rows...")
+    logging.info(f"\n[Step 4/4] Inserting all rows...")
     inserted = load_chunk(rows, conn, 1)
-    print(f"  Inserted {inserted:,} rows.")
+    logging.info(f"  Inserted {inserted:,} rows.")
 
     # Verify
     total_rows_in_table = verify(conn)
     conn.close()
-    print(f"  Total rows skipped  : {len(df) - total_rows_in_table:,} (missing icao24)")
-    print("\nload_aircraft.py complete. dim_aircraft is ready.")
-    print("Next: run seeds/load_airports.py")
+    logging.info(f"  Total rows skipped  : {len(df) - total_rows_in_table:,} (missing icao24)")
+    logging.info("\nload_aircraft.py complete. dim_aircraft is ready.")
+    logging.info("Next: run seeds/load_airports.py")
 
 if __name__ == "__main__":
     main()

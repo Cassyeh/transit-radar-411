@@ -56,6 +56,22 @@ from psycopg2.extras import execute_values
 from io import StringIO
 from dotenv import load_dotenv
 
+import logging
+import os
+
+# Get current file name without extension
+current_file = os.path.splitext(os.path.basename(__file__))[0]
+
+# Set log filename based on current file
+log_filename = f"{current_file}.log"
+
+# Configure logging
+logging.basicConfig(
+    filename=log_filename,
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
 load_dotenv()
 
 # ─────────────────────────────────────────────────────────────
@@ -80,11 +96,11 @@ REGIONS_FILE = os.path.join(SEEDS_DIR, "regions.csv")
 def get_connection():
     try:
         conn = psycopg2.connect(**DB_CONFIG)
-        print("  Connected to PostgreSQL successfully.")
+        logging.info("  Connected to PostgreSQL successfully.")
         return conn
     except Exception as e:
-        print(f"  ERROR: Could not connect to PostgreSQL: {e}")
-        print(f"  Make sure docker compose up -d is running.")
+        logging.info(f"  ERROR: Could not connect to PostgreSQL: {e}")
+        logging.info(f"  Make sure docker compose up -d is running.")
         sys.exit(1)
 
 
@@ -103,12 +119,12 @@ def build_region_lookup():
     keep_default_na=False prevents Pandas from converting
     values like "NA" (Namibia) to NaN.
     """
-    print("\n[Step 1/4] Building region lookup dictionary...")
+    logging.info("\n[Step 1/4] Building region lookup dictionary...")
 
     if not os.path.exists(REGIONS_FILE):
-        print(f"  ERROR: {REGIONS_FILE} not found.")
-        print(f"  Download from:")
-        print(f"  https://davidmegginson.github.io/ourairports-data/regions.csv")
+        logging.info(f"  ERROR: {REGIONS_FILE} not found.")
+        logging.info(f"  Download from:")
+        logging.info(f"  https://davidmegginson.github.io/ourairports-data/regions.csv")
         sys.exit(1)
 
     df = pd.read_csv(REGIONS_FILE, keep_default_na=False)
@@ -122,7 +138,7 @@ def build_region_lookup():
         df["name"].astype(str).str.strip()
     ))
 
-    print(f"  Loaded {len(region_lookup):,} region names.")
+    logging.info(f"  Loaded {len(region_lookup):,} region names.")
     return region_lookup
 
 
@@ -134,8 +150,8 @@ def download_airports():
     Downloads OurAirports airports.csv into a pandas DataFrame.
     The file is small enough (~10MB) to load entirely at once.
     """
-    print(f"\n[Step 2/4] Downloading OurAirports airports database...")
-    print(f"  URL: {AIRPORTS_URL}")
+    logging.info(f"\n[Step 2/4] Downloading OurAirports airports database...")
+    logging.info(f"  URL: {AIRPORTS_URL}")
 
     try:
         response = requests.get(AIRPORTS_URL, timeout=60)
@@ -147,13 +163,13 @@ def download_airports():
             dtype=str
         )
         df.columns = [c.strip().lower() for c in df.columns]
-        print(f"  Downloaded {len(df):,} airport rows.")
+        logging.info(f"  Downloaded {len(df):,} airport rows.")
         return df
     except requests.exceptions.Timeout:
-        print("  ERROR: Download timed out.")
+        logging.info("  ERROR: Download timed out.")
         sys.exit(1)
     except requests.exceptions.RequestException as e:
-        print(f"  ERROR: Download failed: {e}")
+        logging.info(f"  ERROR: Download failed: {e}")
         sys.exit(1)
 
 
@@ -246,49 +262,49 @@ def load_airports(rows, conn):
     has one — unlike airport_iata_code which can be NULL.
     """
     if not rows:
-        print("  No rows to insert.")
+        logging.info("  No rows to insert.")
         return 0
     
     for i, row in enumerate(rows):
         val = row[0]  # position 1 = ident (0-indexed = 0)
         if val and len(str(val)) > 10:
-            print(f"  VIOLATION at row {i}: ident > 10 ={repr(val)} full row={row}")
+            logging.info(f"  VIOLATION at row {i}: ident > 10 ={repr(val)} full row={row}")
             break
     
     for i, row in enumerate(rows):
         val = row[1]  # position 2 = airport_iata_code (0-indexed = 1)
         if val and len(str(val)) > 3:
-            print(f"  VIOLATION at row {i}: airport_iata_code > 3 ={repr(val)} full row={row}")
+            logging.info(f"  VIOLATION at row {i}: airport_iata_code > 3 ={repr(val)} full row={row}")
             break
     
     for i, row in enumerate(rows):
         val = row[2]  # position 3 = ident (0-indexed = 2)
         if val and len(str(val)) > 4:
-            print(f"  VIOLATION at row {i}: airport_icao_code > 4 ={repr(val)} full row={row}")
+            logging.info(f"  VIOLATION at row {i}: airport_icao_code > 4 ={repr(val)} full row={row}")
             break
     
     for i, row in enumerate(rows):
         val = row[4]  # position 5 = airport_type (0-indexed = 4)
         if val and len(str(val)) > 20:
-            print(f"  VIOLATION at row {i}: airport_type > 20 ={repr(val)} full row={row}")
+            logging.info(f"  VIOLATION at row {i}: airport_type > 20 ={repr(val)} full row={row}")
             break
     
     for i, row in enumerate(rows):
         val = row[7]  # position 8 = iso_country (0-indexed = 7)
         if val and len(str(val)) > 2:
-            print(f"  VIOLATION at row {i}: iso_country > 2 ={repr(val)} full row={row}")
+            logging.info(f"  VIOLATION at row {i}: iso_country > 2 ={repr(val)} full row={row}")
             break
     
     for i, row in enumerate(rows):
         val = row[8]  # position 9 = continent (0-indexed = 8)
         if val and len(str(val)) > 2:
-            print(f"  VIOLATION at row {i}: continent > 2 ={repr(val)} full row={row}")
+            logging.info(f"  VIOLATION at row {i}: continent > 2 ={repr(val)} full row={row}")
             break
     
     for i, row in enumerate(rows):
         val = row[9]  # position 10 = iso_region (0-indexed = 9)
         if val and len(str(val)) > 10:
-            print(f"  VIOLATION at row {i}: iso_region > 10 ={repr(val)} full row={row}")
+            logging.info(f"  VIOLATION at row {i}: iso_region > 10 ={repr(val)} full row={row}")
             break
 
     cursor = conn.cursor()
@@ -319,7 +335,7 @@ def load_airports(rows, conn):
         return len(rows)
     except Exception as e:
         conn.rollback()
-        print(f"  ERROR inserting airports: {e}")
+        logging.info(f"  ERROR inserting airports: {e}")
         return 0
     finally:
         cursor.close()
@@ -330,7 +346,7 @@ def load_airports(rows, conn):
 # ─────────────────────────────────────────────────────────────
 def verify(conn):
     """
-    After loading, print row counts and a sample of African
+    After loading, logging.info row counts and a sample of African
     commercial airports to confirm data quality.
     """
     cursor = conn.cursor()
@@ -338,17 +354,17 @@ def verify(conn):
     # Total row count
     cursor.execute("SELECT COUNT(*) FROM dim_airport")
     total = cursor.fetchone()[0]
-    print(f"  dim_airport total rows      : {total:,}")
+    logging.info(f"  dim_airport total rows      : {total:,}")
 
     # Rows with IATA code
     cursor.execute("SELECT COUNT(*) FROM dim_airport WHERE airport_iata_code IS NOT NULL")
     with_iata = cursor.fetchone()[0]
-    print(f"  Rows with IATA code         : {with_iata:,}")
+    logging.info(f"  Rows with IATA code         : {with_iata:,}")
 
     # Commercial airports
     cursor.execute("SELECT COUNT(*) FROM dim_airport WHERE is_commercial = TRUE")
     commercial = cursor.fetchone()[0]
-    print(f"  Commercial airports         : {commercial:,}")
+    logging.info(f"  Commercial airports         : {commercial:,}")
 
     cursor.close()
 
@@ -366,11 +382,11 @@ def verify(conn):
     rows = cursor.fetchall()
     cursor.close()
 
-    print(f"\n  Sample African commercial airports:")
-    print(f"  {'IATA':<6} {'Name':<35} {'City':<20} {'Country':<8} {'Region'}")
-    print(f"  {'-'*6} {'-'*35} {'-'*20} {'-'*8} {'-'*20}")
+    logging.info(f"\n  Sample African commercial airports:")
+    logging.info(f"  {'IATA':<6} {'Name':<35} {'City':<20} {'Country':<8} {'Region'}")
+    logging.info(f"  {'-'*6} {'-'*35} {'-'*20} {'-'*8} {'-'*20}")
     for row in rows:
-        print(
+        logging.info(
             f"  {str(row[0]):<6} {str(row[1]):<35} "
             f"{str(row[2]):<20} {str(row[3]):<8} {str(row[4])}"
         )
@@ -380,9 +396,9 @@ def verify(conn):
 # MAIN
 # ─────────────────────────────────────────────────────────────
 def main():
-    print("=" * 60)
-    print("  Transit Radar 411 — Airport Seed Loader")
-    print("=" * 60)
+    logging.info("=" * 60)
+    logging.info("  Transit Radar 411 — Airport Seed Loader")
+    logging.info("=" * 60)
 
     # Step 1 — Build region lookup from local file
     region_lookup = build_region_lookup()
@@ -394,7 +410,7 @@ def main():
     df = download_airports()
 
     # Step 3 — Map all rows
-    print(f"\n[Step 3/4] Mapping all rows...")
+    logging.info(f"\n[Step 3/4] Mapping all rows...")
     rows    = []
     skipped = 0
 
@@ -405,20 +421,20 @@ def main():
         else:
             skipped += 1
 
-    print(f"  Mapped   {len(rows):,} rows.")
-    print(f"  Skipped  {skipped:,} rows (no ident).")
+    logging.info(f"  Mapped   {len(rows):,} rows.")
+    logging.info(f"  Skipped  {skipped:,} rows (no ident).")
 
     # Step 4 — Bulk insert
-    print(f"\n[Step 4/4] Inserting into dim_airport...")
+    logging.info(f"\n[Step 4/4] Inserting into dim_airport...")
     inserted = load_airports(rows, conn)
-    print(f"  Inserted {inserted:,} rows.")
+    logging.info(f"  Inserted {inserted:,} rows.")
 
     # Verify
     verify(conn)
 
     conn.close()
-    print("\nload_airports.py complete. dim_airport is ready.")
-    print("Next: run seeds/load_geodata.py")
+    logging.info("\nload_airports.py complete. dim_airport is ready.")
+    logging.info("Next: run seeds/load_geodata.py")
 
 
 if __name__ == "__main__":

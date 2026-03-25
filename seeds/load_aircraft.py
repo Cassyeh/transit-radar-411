@@ -51,6 +51,22 @@ from datetime import datetime
 from io import StringIO
 from dotenv import load_dotenv
 
+import logging
+import os
+
+# Get current file name without extension
+current_file = os.path.splitext(os.path.basename(__file__))[0]
+
+# Set log filename based on current file
+log_filename = f"{current_file}.log"
+
+# Configure logging
+logging.basicConfig(
+    filename=log_filename,
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
 # ─────────────────────────────────────────────────────────────
 # LOAD ENVIRONMENT VARIABLES
 # Reads  .env file so we do not hardcode passwords.
@@ -98,12 +114,12 @@ def get_connection():
     """
     try:
         conn = psycopg2.connect(**DB_CONFIG)
-        print("  Connected to PostgreSQL successfully.")
+        logging.info("  Connected to PostgreSQL successfully.")
         return conn
     except Exception as e:
-        print(f"  ERROR: Could not connect to PostgreSQL.")
-        print(f"  Details: {e}")
-        print(f"  Make sure docker compose up -d is running.")
+        logging.info(f"  ERROR: Could not connect to PostgreSQL.")
+        logging.info(f"  Details: {e}")
+        logging.info(f"  Make sure docker compose up -d is running.")
         sys.exit(1)
 
 
@@ -129,21 +145,21 @@ def build_country_lookups():
     lookup is almost instant. Searching a CSV file each time
     would take hours.
     """
-    print("\n[Step 1/4] Building country lookup dictionaries...")
+    logging.info("\n[Step 1/4] Building country lookup dictionaries...")
 
     # Validate local files exist before doing anything else
     if not os.path.exists(REG_PREFIXES_FILE):
-        print(f"  ERROR: {REG_PREFIXES_FILE} not found.")
-        print(f"  Download it from:")
-        print(f"  https://raw.githubusercontent.com/vradarserver/standing-data")
-        print(f"  /main/registration-prefixes/schema-01/reg-prefixes.csv")
+        logging.info(f"  ERROR: {REG_PREFIXES_FILE} not found.")
+        logging.info(f"  Download it from:")
+        logging.info(f"  https://raw.githubusercontent.com/vradarserver/standing-data")
+        logging.info(f"  /main/registration-prefixes/schema-01/reg-prefixes.csv")
         sys.exit(1)
 
     if not os.path.exists(COUNTRIES_FILE):
-        print(f"  ERROR: {COUNTRIES_FILE} not found.")
-        print(f"  Download it from:")
-        print(f"  https://raw.githubusercontent.com/vradarserver/standing-data")
-        print(f"  /main/countries/schema-01/countries.csv")
+        logging.info(f"  ERROR: {COUNTRIES_FILE} not found.")
+        logging.info(f"  Download it from:")
+        logging.info(f"  https://raw.githubusercontent.com/vradarserver/standing-data")
+        logging.info(f"  /main/countries/schema-01/countries.csv")
         sys.exit(1)
 
     # Read registration prefix to ISO2 mapping
@@ -154,7 +170,7 @@ def build_country_lookups():
         reg_df["Prefix"].astype(str).str.strip(),
         reg_df["CountryISO2"].astype(str).str.strip()
     ))
-    print(f"  Loaded {len(prefix_to_iso2):,} registration prefixes.")
+    logging.info(f"  Loaded {len(prefix_to_iso2):,} registration prefixes.")
 
     # Read ISO2 to country name mapping
     # Columns in file: ISO, Name
@@ -164,7 +180,7 @@ def build_country_lookups():
         countries_df["ISO"].astype(str).str.strip(),
         countries_df["Name"].astype(str).str.strip()
     ))
-    print(f"  Loaded {len(iso2_to_name):,} country names.")
+    logging.info(f"  Loaded {len(iso2_to_name):,} country names.")
 
     return prefix_to_iso2, iso2_to_name
 
@@ -205,7 +221,7 @@ def get_country_from_registration(registration, prefix_to_iso2, iso2_to_name):
     country_iso2 = prefix_to_iso2[prefix]
 
     # ── TEMPORARY DEBUG ──────────────────────────────────────
-    #print(f"  DEBUG: prefix={prefix} country_iso2={country_iso2} type={type(country_iso2)} len={len(str(country_iso2))}")
+    #logging.info(f"  DEBUG: prefix={prefix} country_iso2={country_iso2} type={type(country_iso2)} len={len(str(country_iso2))}")
     # ─────────────────────────────────────────────────────────
 
     country_of_reg = iso2_to_name.get(country_iso2)
@@ -227,9 +243,9 @@ def download_opensky_aircraft():
 
     Returns the response object — we iterate over it in main().
     """
-    print(f"\n[Step 2/4] Connecting to OpenSky aircraft database...")
-    print(f"  URL: {OPENSKY_AIRCRAFT_URL}")
-    print(f"  This file is large. Processing will begin shortly...")
+    logging.info(f"\n[Step 2/4] Connecting to OpenSky aircraft database...")
+    logging.info(f"  URL: {OPENSKY_AIRCRAFT_URL}")
+    logging.info(f"  This file is large. Processing will begin shortly...")
 
     try:
         response = requests.get(
@@ -238,13 +254,13 @@ def download_opensky_aircraft():
             timeout=120
         )
         response.raise_for_status()
-        print(f"  Connection established. Processing in chunks of {CHUNK_SIZE:,}...")
+        logging.info(f"  Connection established. Processing in chunks of {CHUNK_SIZE:,}...")
         return response
     except requests.exceptions.Timeout:
-        print("  ERROR: Connection timed out after 2 minutes.")
+        logging.info("  ERROR: Connection timed out after 2 minutes.")
         sys.exit(1)
     except requests.exceptions.RequestException as e:
-        print(f"  ERROR: Download failed: {e}")
+        logging.info(f"  ERROR: Download failed: {e}")
         sys.exit(1)
 
 
@@ -355,7 +371,7 @@ def load_chunk(rows, conn, chunk_number):
     
     # ── TEMPORARY DEBUG ──────────────────────────────────────
     if chunk_number == 1:
-        print(f"  DEBUG first row: {rows[0]}")
+        logging.info(f"  DEBUG first row: {rows[0]}")
 
     cursor = conn.cursor()
     try:
@@ -388,8 +404,8 @@ def load_chunk(rows, conn, chunk_number):
         return len(rows)
     except Exception as e:
         conn.rollback()
-        print(f"  ERROR in chunk {chunk_number}: {e}")
-        print(f"  DEBUG row: {rows[0]}")
+        logging.info(f"  ERROR in chunk {chunk_number}: {e}")
+        logging.info(f"  DEBUG row: {rows[0]}")
         return 0
     finally:
         cursor.close()
@@ -409,7 +425,7 @@ def verify(conn):
     cursor.execute("SELECT COUNT(*) FROM dim_aircraft")
     count = cursor.fetchone()[0]
     cursor.close()
-    print(f"  dim_aircraft total rows: {count:,}")
+    logging.info(f"  dim_aircraft total rows: {count:,}")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -417,9 +433,9 @@ def verify(conn):
 # ─────────────────────────────────────────────────────────────
 
 def main():
-    print("=" * 60)
-    print("  Transit Radar 411 — Aircraft Seed Loader")
-    print("=" * 60)
+    logging.info("=" * 60)
+    logging.info("  Transit Radar 411 — Aircraft Seed Loader")
+    logging.info("=" * 60)
 
     # Step 1 — Build lookup dictionaries
     prefix_to_iso2, iso2_to_name = build_country_lookups()
@@ -431,7 +447,7 @@ def main():
     response = download_opensky_aircraft()
 
     # Step 3 and 4 — Read stream, map columns, insert in chunks
-    print(f"\n[Step 3/4] Processing and inserting...")
+    logging.info(f"\n[Step 3/4] Processing and inserting...")
 
     chunk_number   = 0
     total_inserted = 0
@@ -475,7 +491,7 @@ def main():
             inserted = load_chunk(rows, conn, chunk_number)
             total_inserted += inserted
 
-            print(
+            logging.info(
                 f"  Chunk {chunk_number:>4} | "
                 f"inserted {inserted:>6,} | "
                 f"total {total_inserted:>8,}"
@@ -501,21 +517,21 @@ def main():
 
         inserted = load_chunk(rows, conn, chunk_number)
         total_inserted += inserted
-        print(
+        logging.info(
             f"  Chunk {chunk_number:>4} | "
             f"inserted {inserted:>6,} | "
             f"total {total_inserted:>8,}"
         )
 
     # Step 4 — Verify
-    print(f"\n[Step 4/4] Verifying...")
-    print(f"  Total rows inserted : {total_inserted:,}")
-    print(f"  Total rows skipped  : {total_skipped:,} (missing icao24)")
+    logging.info(f"\n[Step 4/4] Verifying...")
+    logging.info(f"  Total rows inserted : {total_inserted:,}")
+    logging.info(f"  Total rows skipped  : {total_skipped:,} (missing icao24)")
     verify(conn)
 
     conn.close()
-    print("\nload_aircraft.py complete. dim_aircraft is ready.")
-    print("Next: run seeds/load_airports.py")
+    logging.info("\nload_aircraft.py complete. dim_aircraft is ready.")
+    logging.info("Next: run seeds/load_airports.py")
 
 
 if __name__ == "__main__":

@@ -35,6 +35,22 @@ from psycopg2.extras import execute_values
 from dotenv import load_dotenv
 from iso3_mapping import iso3_mapping
 
+import logging
+import os
+
+# Get current file name without extension
+current_file = os.path.splitext(os.path.basename(__file__))[0]
+
+# Set log filename based on current file
+log_filename = f"{current_file}.log"
+
+# Configure logging
+logging.basicConfig(
+    filename=log_filename,
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
 load_dotenv()
 
 # ─────────────────────────────────────────────────────────────
@@ -58,10 +74,10 @@ SHAPEFILE  = os.path.join(SEEDS_DIR, "ne_10m_admin_1_states_provinces.shp")
 def get_connection():
     try:
         conn = psycopg2.connect(**DB_CONFIG)
-        print("  Connected to PostgreSQL successfully.")
+        logging.info("  Connected to PostgreSQL successfully.")
         return conn
     except Exception as e:
-        print(f"  ERROR: Could not connect to PostgreSQL: {e}")
+        logging.info(f"  ERROR: Could not connect to PostgreSQL: {e}")
         sys.exit(1)
 
 
@@ -71,21 +87,21 @@ def get_connection():
 def read_shapefile():
     import geopandas as gpd
 
-    print("\n[Step 1/3] Reading Natural Earth admin-1 states/provinces Shapefile...")
+    logging.info("\n[Step 1/3] Reading Natural Earth admin-1 states/provinces Shapefile...")
 
     if not os.path.exists(SHAPEFILE):
-        print(f"  ERROR: {SHAPEFILE} not found.")
-        print(f"  Make sure all four Shapefile files are in your seeds folder:")
-        print(f"  .shp, .shx, .dbf, .prj")
+        logging.info(f"  ERROR: {SHAPEFILE} not found.")
+        logging.info(f"  Make sure all four Shapefile files are in your seeds folder:")
+        logging.info(f"  .shp, .shx, .dbf, .prj")
         sys.exit(1)
 
     gdf = gpd.read_file(SHAPEFILE)
-    print(f"  Read {len(gdf):,} rows from shapefile.")
-    print(f"  Total columns in file: {len(gdf.columns)}")
+    logging.info(f"  Read {len(gdf):,} rows from shapefile.")
+    logging.info(f"  Total columns in file: {len(gdf.columns)}")
 
     # Filter for featurecla = "Admin-1 states provinces"
     gdf = gdf[gdf['featurecla'] == "Admin-1 states provinces"]
-    print(f"  Filtered to {len(gdf):,} admin-1 states/provinces.")
+    logging.info(f"  Filtered to {len(gdf):,} admin-1 states/provinces.")
 
     return gdf
 
@@ -177,7 +193,7 @@ def find_missing_iso3(gdf, conn):
 # ─────────────────────────────────────────────────────────────
 def load_states(rows, conn):
     if not rows:
-        print("  No rows to insert.")
+        logging.info("  No rows to insert.")
         return 0
 
     cursor = conn.cursor()
@@ -209,7 +225,7 @@ def load_states(rows, conn):
         return len(rows)
     except Exception as e:
         conn.rollback()
-        print(f"  ERROR inserting states: {e}")
+        logging.info(f"  ERROR inserting states: {e}")
         return 0
     finally:
         cursor.close()
@@ -222,17 +238,17 @@ def verify(conn):
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM dim_state")
     total = cursor.fetchone()[0]
-    print(f"  dim_state total rows: {total:,}")
+    logging.info(f"  dim_state total rows: {total:,}")
 
     cursor.execute("SELECT COUNT(*) FROM dim_state WHERE boundary IS NOT NULL")
     with_boundary = cursor.fetchone()[0]
-    print(f"  Rows with boundary: {with_boundary:,}")
+    logging.info(f"  Rows with boundary: {with_boundary:,}")
 
     cursor.close()
 
     # Test ST_Contains with Lagos coordinates
     # This confirms PostGIS territory detection is working
-    print(f"\n  Testing ST_Contains with Lagos coordinates (3.50, 6.45)...")
+    logging.info(f"\n  Testing ST_Contains with Lagos coordinates (3.50, 6.45)...")
     cursor = conn.cursor()
     cursor.execute("""
     SELECT *
@@ -246,20 +262,20 @@ def verify(conn):
     cursor.close()
 
     if result:
-        print(f"  Result: {result}")
-        print(f"  ST_Contains is working correctly.")
+        logging.info(f"  Result: {result}")
+        logging.info(f"  ST_Contains is working correctly.")
     else:
-        print(f"  WARNING: No state found for Lagos coordinates.")
-        print(f"  This may indicate a geometry issue.")
+        logging.info(f"  WARNING: No state found for Lagos coordinates.")
+        logging.info(f"  This may indicate a geometry issue.")
 
 
 # ─────────────────────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────────────────────
 def main():
-    print("="*60)
-    print("  Transit Radar 411 — Geodata States Loader")
-    print("="*60)
+    logging.info("="*60)
+    logging.info("  Transit Radar 411 — Geodata States Loader")
+    logging.info("="*60)
 
     gdf = read_shapefile()
     conn = get_connection()
@@ -270,7 +286,7 @@ def main():
     dim_country_iso3 = [row[0] for row in cursor.fetchall() if row[0]]
     cursor.close()
 
-    print(f"\n[Step 2/3] Mapping all rows...")
+    logging.info(f"\n[Step 2/3] Mapping all rows...")
     rows = []
     skipped = 0
     for _, row in gdf.iterrows():
@@ -280,24 +296,24 @@ def main():
         else:
             skipped += 1
 
-    print(f"  Mapped   {len(rows):,} rows.")
-    print(f"  Skipped  {skipped:,} rows (invalid or missing geometry).")
+    logging.info(f"  Mapped   {len(rows):,} rows.")
+    logging.info(f"  Skipped  {skipped:,} rows (invalid or missing geometry).")
 
     # Extract all iso3 codes from the tuples
     tuple_iso3 = [row[4] for row in rows if row[4]]  # 3rd index is country_iso3
 
     # Check which iso3 in the tuples doesn't exist in dim_country
     missing_iso3 = set(tuple_iso3) - set(dim_country_iso3)
-    print("\nISO3 in tuples but missing in dim_country:")
-    print(sorted(missing_iso3))
+    logging.info("\nISO3 in tuples but missing in dim_country:")
+    logging.info(sorted(missing_iso3))
 
-    print(f"\n[Step 3/3] Inserting into dim_state...")
+    logging.info(f"\n[Step 3/3] Inserting into dim_state...")
     #inserted = load_states(rows, conn)
-    #print(f"  Inserted {inserted:,} rows.")
+    #logging.info(f"  Inserted {inserted:,} rows.")
 
     verify(conn)
     conn.close()
-    print("\nload_geodata_states.py complete. dim_state is ready.")
+    logging.info("\nload_geodata_states.py complete. dim_state is ready.")
 
 
 if __name__ == "__main__":

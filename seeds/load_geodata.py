@@ -55,6 +55,22 @@ import psycopg2
 from psycopg2.extras import execute_values
 from dotenv import load_dotenv
 
+import logging
+import os
+
+# Get current file name without extension
+current_file = os.path.splitext(os.path.basename(__file__))[0]
+
+# Set log filename based on current file
+log_filename = f"{current_file}.log"
+
+# Configure logging
+logging.basicConfig(
+    filename=log_filename,
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
 load_dotenv()
 
 # ─────────────────────────────────────────────────────────────
@@ -78,11 +94,11 @@ SHAPEFILE  = os.path.join(SEEDS_DIR, "ne_110m_admin_0_countries.shp")
 def get_connection():
     try:
         conn = psycopg2.connect(**DB_CONFIG)
-        print("  Connected to PostgreSQL successfully.")
+        logging.info("  Connected to PostgreSQL successfully.")
         return conn
     except Exception as e:
-        print(f"  ERROR: Could not connect to PostgreSQL: {e}")
-        print(f"  Make sure docker compose up -d is running.")
+        logging.info(f"  ERROR: Could not connect to PostgreSQL: {e}")
+        logging.info(f"  Make sure docker compose up -d is running.")
         sys.exit(1)
 
 
@@ -100,24 +116,24 @@ def read_shapefile():
     We select only the 9 columns we need and rename them
     to match our dim_country column names.
     """
-    print("\n[Step 1/3] Reading Natural Earth Shapefile...")
+    logging.info("\n[Step 1/3] Reading Natural Earth Shapefile...")
 
     if not os.path.exists(SHAPEFILE):
-        print(f"  ERROR: {SHAPEFILE} not found.")
-        print(f"  Make sure all four Shapefile files are in your seeds folder:")
-        print(f"  .shp, .shx, .dbf, .prj")
+        logging.info(f"  ERROR: {SHAPEFILE} not found.")
+        logging.info(f"  Make sure all four Shapefile files are in your seeds folder:")
+        logging.info(f"  .shp, .shx, .dbf, .prj")
         sys.exit(1)
 
     try:
         import geopandas as gpd
     except ImportError:
-        print("  ERROR: geopandas is not installed.")
-        print("  Run: pip install geopandas")
+        logging.info("  ERROR: geopandas is not installed.")
+        logging.info("  Run: pip install geopandas")
         sys.exit(1)
 
     gdf = gpd.read_file(SHAPEFILE)
-    print(f"  Read {len(gdf):,} country rows.")
-    print(f"  Total columns in file: {len(gdf.columns)}")
+    logging.info(f"  Read {len(gdf):,} country rows.")
+    logging.info(f"  Total columns in file: {len(gdf.columns)}")
 
     # Select only the columns we need and rename them
     # Natural Earth uses uppercase column names
@@ -135,7 +151,7 @@ def read_shapefile():
     }
 
     gdf = gdf[list(columns_map.keys())].rename(columns=columns_map)
-    print(f"  Selected {len(gdf.columns)} columns.")
+    logging.info(f"  Selected {len(gdf.columns)} columns.")
 
     return gdf
 
@@ -171,7 +187,7 @@ def map_row(row):
         if (clean_str(val) == "CN-TW"):
             # for iso2 > 2 chars
             s = "TW"
-            print(s)
+            logging.info(s)
             return s if s and s.lower() not in ("nan", "none") else None
         s = clean_str(val)
         if s == "-99" or s == "-9":
@@ -241,13 +257,13 @@ def load_countries(rows, conn):
     into a PostGIS geometry object stored in the boundary column.
     """
     if not rows:
-        print("  No rows to insert.")
+        logging.info("  No rows to insert.")
         return 0
     
     for i, row in enumerate(rows):
         val = row[0]  # position 1 = iso2 (0-indexed = 0)
         if val and len(str(val)) > 2:
-            print(f"  VIOLATION at row {i}: iso2 > 2 ={repr(val)} full row={row}")
+            logging.info(f"  VIOLATION at row {i}: iso2 > 2 ={repr(val)} full row={row}")
             break
 
     cursor = conn.cursor()
@@ -282,7 +298,7 @@ def load_countries(rows, conn):
         return len(rows)
     except Exception as e:
         conn.rollback()
-        print(f"  ERROR inserting countries: {e}")
+        logging.info(f"  ERROR inserting countries: {e}")
         return 0
     finally:
         cursor.close()
@@ -303,23 +319,23 @@ def verify(conn):
     # Total rows
     cursor.execute("SELECT COUNT(*) FROM dim_country")
     total = cursor.fetchone()[0]
-    print(f"  dim_country total rows: {total:,}")
+    logging.info(f"  dim_country total rows: {total:,}")
 
     # Rows with boundary polygon
     cursor.execute("SELECT COUNT(*) FROM dim_country WHERE boundary IS NOT NULL")
     with_boundary = cursor.fetchone()[0]
-    print(f"  Rows with boundary    : {with_boundary:,}")
+    logging.info(f"  Rows with boundary    : {with_boundary:,}")
 
     # Rows with no iso2 (disputed territories)
     cursor.execute("SELECT COUNT(*) FROM dim_country WHERE iso2 IS NULL")
     no_iso2 = cursor.fetchone()[0]
-    print(f"  Rows with no iso2     : {no_iso2:,} (disputed territories)")
+    logging.info(f"  Rows with no iso2     : {no_iso2:,} (disputed territories)")
 
     cursor.close()
 
     # Test ST_Contains with Lagos coordinates
     # This confirms PostGIS territory detection is working
-    print(f"\n  Testing ST_Contains with Lagos coordinates (3.39, 6.45)...")
+    logging.info(f"\n  Testing ST_Contains with Lagos coordinates (3.39, 6.45)...")
     cursor = conn.cursor()
     cursor.execute("""
         SELECT country_name, iso2, continent
@@ -333,11 +349,11 @@ def verify(conn):
     cursor.close()
 
     if result:
-        print(f"  Result: {result[0]} ({result[1]}) — {result[2]}")
-        print(f"  ST_Contains is working correctly.")
+        logging.info(f"  Result: {result[0]} ({result[1]}) — {result[2]}")
+        logging.info(f"  ST_Contains is working correctly.")
     else:
-        print(f"  WARNING: No country found for Lagos coordinates.")
-        print(f"  This may indicate a geometry issue.")
+        logging.info(f"  WARNING: No country found for Lagos coordinates.")
+        logging.info(f"  This may indicate a geometry issue.")
 
     # Show a sample of African countries
     cursor = conn.cursor()
@@ -351,20 +367,20 @@ def verify(conn):
     rows = cursor.fetchall()
     cursor.close()
 
-    print(f"\n  Sample African countries:")
-    print(f"  {'ISO2':<6} {'ISO3':<6} {'Name':<40} {'Subregion'}")
-    print(f"  {'-'*6} {'-'*6} {'-'*40} {'-'*25}")
+    logging.info(f"\n  Sample African countries:")
+    logging.info(f"  {'ISO2':<6} {'ISO3':<6} {'Name':<40} {'Subregion'}")
+    logging.info(f"  {'-'*6} {'-'*6} {'-'*40} {'-'*25}")
     for row in rows:
-        print(f"  {str(row[0]):<6} {str(row[1]):<6} {str(row[2]):<40} {str(row[4])}")
+        logging.info(f"  {str(row[0]):<6} {str(row[1]):<6} {str(row[2]):<40} {str(row[4])}")
 
 
 # ─────────────────────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────────────────────
 def main():
-    print("=" * 60)
-    print("  Transit Radar 411 — Geodata Seed Loader")
-    print("=" * 60)
+    logging.info("=" * 60)
+    logging.info("  Transit Radar 411 — Geodata Seed Loader")
+    logging.info("=" * 60)
 
     # Step 1 — Read Shapefile
     gdf = read_shapefile()
@@ -373,7 +389,7 @@ def main():
     conn = get_connection()
 
     # Step 2 — Map all rows
-    print(f"\n[Step 2/3] Mapping all rows...")
+    logging.info(f"\n[Step 2/3] Mapping all rows...")
     rows    = []
     skipped = 0
 
@@ -384,20 +400,20 @@ def main():
         else:
             skipped += 1
 
-    print(f"  Mapped   {len(rows):,} rows.")
-    print(f"  Skipped  {skipped:,} rows (no country name).")
+    logging.info(f"  Mapped   {len(rows):,} rows.")
+    logging.info(f"  Skipped  {skipped:,} rows (no country name).")
 
     # Step 3 — Insert into dim_country
-    print(f"\n[Step 3/3] Inserting into dim_country...")
+    logging.info(f"\n[Step 3/3] Inserting into dim_country...")
     inserted = load_countries(rows, conn)
-    print(f"  Inserted {inserted:,} rows.")
+    logging.info(f"  Inserted {inserted:,} rows.")
 
     # Verify
     verify(conn)
 
     conn.close()
-    print("\nload_geodata.py complete. dim_country is ready.")
-    print("Next: run seeds/load_historical_states.py")
+    logging.info("\nload_geodata.py complete. dim_country is ready.")
+    logging.info("Next: run seeds/load_historical_states.py")
 
 
 if __name__ == "__main__":
