@@ -37,6 +37,7 @@ pipeline/gold/data/
 *.delta
 *.csv
 *.xlsx
+*.gz
 
 # dbt
 dbt/target/

@@ -53,12 +53,24 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+    command: >
+      postgres
+      -c max_wal_size=4GB
+      -c min_wal_size=1GB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=64MB
+      -c shared_buffers=512MB
+      -c effective_cache_size=2GB
+      -c work_mem=64MB
+      -c maintenance_work_mem=512MB
+      -c synchronous_commit=off
     volumes:
       - ./postgres/init:/docker-entrypoint-initdb.d
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
+      timeout: 5s
       retries: 5
   
   # ──────────────────────────────────────────

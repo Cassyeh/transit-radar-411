@@ -1,13 +1,13 @@
 """
-seeds/load_historical_states.py
+seeds/load_historical_states_postgres_staging.py
 
 WHAT THIS SCRIPT DOES
 ---------------------
 Loads historical flight data from the OpenSky COVID-19 flight
 dataset into hist_flight_events using two major optimisations:
 
-1. BULK INSERT — uses execute_values with page_size=5000
-   instead of one-row-at-a-time inserts. 10-50x faster.
+1. Decompress the .gz file into a temp CSV.
+   Use COPY to load raw CSV into a PostgreSQL staging table
 
 2. MPP (Massively Parallel Processing) — processes multiple
    files simultaneously using Python multiprocessing.
@@ -39,7 +39,7 @@ Run: python seeds/load_historical_territories.py
 HOW TO RUN
 ----------
     docker compose up -d
-    python seeds/load_historical_states.py
+    python seeds/load_historical_states_postgres_staging.py
 
 CRASH RECOVERY
 --------------
@@ -52,12 +52,15 @@ and will be skipped automatically.
 import os
 import sys
 import logging
+import csv
+import tempfile
 import multiprocessing as mp
 import pandas as pd
 import psycopg2
 from psycopg2.extras import execute_values
 from datetime import datetime, timezone
 from dotenv import load_dotenv
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.emails_utils import send_email
@@ -97,8 +100,9 @@ PAGE_SIZE        = 5_000
 
 # Number of parallel workers
 # cpu_count() - 1 leaves one core free for PostgreSQL and OS
-#NUM_WORKERS      = min(4, max(1, mp.cpu_count() - 1))
-NUM_WORKERS = 4
+#NUM_WORKERS      = min(6, mp.cpu_count() - 1)
+#
+NUM_WORKERS = 1
 
 
 # ─────────────────────────────────────────────────────────────
@@ -144,7 +148,7 @@ def mark_checkpoint(filename: str) -> None:
 # ─────────────────────────────────────────────────────────────
 # DATABASE CONNECTION
 # ─────────────────────────────────────────────────────────────
-def get_connection():
+def get_connection_2():
     """
     Creates a PostgreSQL connection.
     Each multiprocessing worker calls this independently —
@@ -154,6 +158,28 @@ def get_connection():
         return psycopg2.connect(**DB_CONFIG)
     except Exception as e:
         raise RuntimeError(f"Cannot connect to PostgreSQL: {e}")
+
+def get_connection(retries: int = 5, delay: int = 10):
+    """
+    Creates a PostgreSQL connection with retry logic.
+    Retries up to `retries` times with `delay` seconds between
+    attempts. This handles temporary connection failures when
+    PostgreSQL is under heavy bulk load.
+    """
+    import time
+    last_error = None
+    for attempt in range(1, retries + 1):
+        try:
+            return psycopg2.connect(**DB_CONFIG)
+        except Exception as e:
+            last_error = e
+            if attempt < retries:
+                log.warning(
+                    f"  Connection attempt {attempt}/{retries} failed. "
+                    f"Retrying in {delay}s..."
+                )
+                time.sleep(delay)
+    raise RuntimeError(f"Cannot connect to PostgreSQL after {retries} attempts: {last_error}")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -285,50 +311,250 @@ def map_flight_to_events(
 
 
 # ─────────────────────────────────────────────────────────────
-# BULK INSERT FLIGHT EVENTS
+# STEP 1 OF 3: DECOMPRESS .GZ TO TEMP CSV
 # ─────────────────────────────────────────────────────────────
-def insert_flight_events_bulk(rows: list[tuple], conn) -> int:
+def decompress_to_temp_csv(filepath: str) -> str:
     """
-    Bulk-inserts all flight event rows in one SQL statement
-    using execute_values with page_size=PAGE_SIZE.
+    Decompresses a .csv.gz file to a temporary CSV file on disk.
 
-    This is 10-50x faster than inserting one row at a time.
+    Returns the path to the temp CSV file.
+    The caller is responsible for deleting it after use.
 
-    execute_values sends rows in batches of PAGE_SIZE.
-    For 100,000 rows with PAGE_SIZE=5000 that is 20 SQL
-    statements instead of 100,000.
-
-    ON CONFLICT DO NOTHING means already-inserted rows
-    are silently skipped — idempotent and crash-safe.
-
-    Returns number of rows inserted.
+    Why decompress to disk instead of reading into memory?
+    PostgreSQL COPY reads from a file path or STDIN — it cannot
+    read from a gzip stream directly. We write to disk first
+    so COPY can read it at full speed via STDIN.
     """
-    if not rows:
-        return 0
+    import gzip
+    import shutil
+    import tempfile
 
+    tmp = tempfile.NamedTemporaryFile(
+        suffix="_raw.csv", delete=False, mode="wb"
+    )
+    tmp_path = tmp.name
+
+    with gzip.open(filepath, "rb") as gz:
+        shutil.copyfileobj(gz, tmp)
+    tmp.close()
+
+    return tmp_path
+
+
+# ─────────────────────────────────────────────────────────────
+# STEP 2 OF 3: COPY RAW CSV INTO STAGING TABLE
+# ─────────────────────────────────────────────────────────────
+def copy_raw_to_staging(tmp_csv_path: str, conn) -> None:
+    """
+    Loads the raw decompressed CSV into a temporary PostgreSQL
+    staging table using COPY — the fastest possible ingestion method.
+
+    The staging table accepts all columns as TEXT so COPY runs
+    at full speed with zero type validation overhead. Type
+    conversion and transformation happen in the next step.
+
+    TEMPORARY means the staging table auto-drops when the
+    database connection closes — no manual cleanup needed.
+
+    ON COMMIT DROP means the table is also dropped if the
+    transaction commits or rolls back — belt and braces.
+    """
     cursor = conn.cursor()
     try:
-        execute_values(
-            cursor,
-            """
-            INSERT INTO hist_flight_events (
-                icao24, callsign, event_type, event_timestamp,
-                event_date, latitude, longitude, altitude_ft,
-                origin_iata, destination_iata, source,
-                inserted_at, batch_date, created_at
-            ) VALUES %s
-            ON CONFLICT DO NOTHING
-            """,
-            rows,
-            page_size=PAGE_SIZE
-        )
-        conn.commit()
-        return cursor.rowcount
-    except Exception as e:
-        conn.rollback()
-        raise e
+        cursor.execute("""
+            CREATE TEMP TABLE IF NOT EXISTS staging_flights (
+                callsign     TEXT,
+                number       TEXT,
+                icao24       TEXT,
+                registration TEXT,
+                typecode     TEXT,
+                origin       TEXT,
+                destination  TEXT,
+                firstseen    TEXT,
+                lastseen     TEXT,
+                day          TEXT,
+                latitude_1   TEXT,
+                longitude_1  TEXT,
+                altitude_1   TEXT,
+                latitude_2   TEXT,
+                longitude_2  TEXT,
+                altitude_2   TEXT
+            ) ON COMMIT DROP
+        """)
+
+        with open(tmp_csv_path, "r", encoding="utf-8", errors="replace") as f:
+            #print(tmp_csv_path)
+            cursor.copy_expert("""
+                COPY staging_flights FROM STDIN
+                WITH (FORMAT CSV, HEADER TRUE, NULL '')
+            """, f)
+        
+        cursor.execute("SELECT COUNT(*) FROM staging_flights")
+        file_rows_count = cursor.fetchone()[0]
+        print(f"{tmp_csv_path} has {file_rows_count} amount of rows")
+        #conn.commit()
+        conn_check = get_connection()
+        cursor     = conn_check.cursor()
     finally:
         cursor.close()
+
+
+# ─────────────────────────────────────────────────────────────
+# STEP 3 OF 3: TRANSFORM IN PYTHON AND COPY OUT TO HIST TABLE
+# ─────────────────────────────────────────────────────────────
+def transform_and_copy_out(
+    conn,
+    airport_lookup: dict,
+    now: datetime,
+    batch_date
+) -> tuple[int, int]:
+    """
+    Reads from the staging table into Python, applies the
+    existing map_flight_to_events() transformation, writes
+    the clean result to a second temp CSV, then COPYs that
+    clean CSV directly into hist_flight_events.
+
+    Why COPY out instead of execute_values?
+    ----------------------------------------
+    execute_values still uses SQL parameter binding which
+    has overhead per row — quoting, escaping, parsing.
+    COPY FROM STDIN bypasses all of that and writes directly
+    to PostgreSQL storage. For 100,000+ rows this is
+    3-5x faster than execute_values.
+
+    Why write a clean CSV instead of streaming directly?
+    -----------------------------------------------------
+    COPY expects to read a complete file. Writing to a temp
+    CSV first lets us build all rows in Python memory before
+    sending — simpler and more reliable than streaming.
+
+    Returns (events_inserted, rows_skipped) as a tuple.
+    """
+    cursor   = conn.cursor()
+    tmp_clean_path = None
+
+    try:
+        # Read all rows from staging into Python
+        cursor.execute("""
+            SELECT
+                callsign, number, icao24, registration,
+                typecode, origin, destination,
+                firstseen, lastseen, day,
+                latitude_1, longitude_1, altitude_1,
+                latitude_2, longitude_2, altitude_2
+            FROM staging_flights
+            WHERE icao24 IS NOT NULL
+            AND  TRIM(icao24) != ''
+        """)
+
+        columns      = [desc[0] for desc in cursor.description]
+        staging_rows = cursor.fetchall()
+
+        # Apply Python transformation and write to clean temp CSV
+        tmp_clean = tempfile.NamedTemporaryFile(
+            suffix="_clean.csv", delete=False,
+            mode="w", encoding="utf-8", newline=""
+        )
+        tmp_clean_path = tmp_clean.name
+        writer         = csv.writer(tmp_clean, quoting=csv.QUOTE_MINIMAL)
+
+        total_events = 0
+        rows_skipped = 0
+
+        for staging_row in staging_rows:
+            row_dict = dict(zip(columns, staging_row))
+
+            events = map_flight_to_events(
+                row=row_dict,
+                airport_lookup=airport_lookup,
+                now=now,
+                batch_date=batch_date
+            )
+
+            if events:
+                for event in events:
+                    # Convert Python objects to strings for COPY
+                    # datetime → ISO string, None → empty string
+                    clean_row = [
+                        v.isoformat()
+                        if isinstance(v, (datetime, type(now.date())))
+                        else ('' if v is None else str(v))
+                        for v in event
+                    ]
+                    writer.writerow(clean_row)
+                    total_events += 1
+            else:
+                rows_skipped += 1
+
+        tmp_clean.close()
+
+        # COPY clean CSV directly into hist_flight_events
+        # No execute_values, no parameter binding — pure COPY speed
+        with open(tmp_clean_path, "r", encoding="utf-8") as f:
+            cursor.copy_expert("""
+                COPY hist_flight_events (
+                    icao24, callsign, event_type, event_timestamp,
+                    event_date, latitude, longitude, altitude_ft,
+                    origin_iata, destination_iata, source,
+                    inserted_at, batch_date, created_at
+                )
+                FROM STDIN
+                WITH (FORMAT CSV, NULL '')
+            """, f)
+
+        conn.commit()
+        return total_events, rows_skipped
+
+    finally:
+        cursor.close()
+        if tmp_clean_path and os.path.exists(tmp_clean_path):
+            os.remove(tmp_clean_path)
+
+
+# ─────────────────────────────────────────────────────────────
+# ORCHESTRATOR: COPY AND TRANSFORM
+# ─────────────────────────────────────────────────────────────
+def copy_and_transform(
+    filepath: str,
+    conn,
+    airport_lookup: dict,
+    now: datetime,
+    batch_date
+) -> tuple[int, int]:
+    """
+    Orchestrates the three-step COPY pipeline for one file:
+
+        Step 1: decompress_to_temp_csv()
+                .gz → temp CSV on disk
+
+        Step 2: copy_raw_to_staging()
+                COPY temp CSV → PostgreSQL staging table
+                Fastest possible ingestion — zero type overhead
+
+        Step 3: transform_and_copy_out()
+                SELECT staging → Python transform → clean CSV
+                COPY clean CSV → hist_flight_events
+                Fastest possible output — no parameter binding
+
+    Each step is a separate function with one responsibility.
+    If any step fails the exception propagates up to
+    process_file() which handles logging and error reporting.
+
+    Returns (events_inserted, rows_skipped) as a tuple.
+    """
+    tmp_raw_path = None
+    try:
+        tmp_raw_path = decompress_to_temp_csv(filepath)
+        copy_raw_to_staging(tmp_raw_path, conn)
+        events_inserted, skipped = transform_and_copy_out(
+            conn, airport_lookup, now, batch_date
+        )
+        return events_inserted, skipped
+
+    finally:
+        # Always clean up raw temp CSV even if an error occurred
+        if tmp_raw_path and os.path.exists(tmp_raw_path):
+            os.remove(tmp_raw_path)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -336,91 +562,65 @@ def insert_flight_events_bulk(rows: list[tuple], conn) -> int:
 # ─────────────────────────────────────────────────────────────
 def process_file(args: tuple) -> dict:
     """
-    Reads one monthly .csv.gz file, maps all rows to event
-    tuples, and bulk-inserts them into hist_flight_events.
+    Entry point for each multiprocessing worker.
+    Each worker calls this function independently with its
+    own database connection — connections cannot be shared
+    between processes.
 
-    This function runs inside a worker process — each worker
-    calls this independently with its own database connection.
+    Orchestrates the full pipeline for one monthly file:
+        1. Get database connection
+        2. Build airport lookup
+        3. Run copy_and_transform() — the three-step COPY pipeline
+        4. Mark file complete in checkpoint
 
-    Parameters (passed as a single tuple for multiprocessing):
+    Parameters passed as a single tuple (multiprocessing requirement):
         filepath     — full path to the .csv.gz file
         file_number  — position in the overall sequence
-        total_files  — total number of files
+        total_files  — total number of files being processed
 
-    Returns a summary dict for the main process to aggregate.
+    Returns a summary dict aggregated by main().
     """
     filepath, file_number, total_files = args
     filename = os.path.basename(filepath)
 
-    # Each worker needs its own connection and airport lookup
+    # Each worker creates its own connection and airport lookup
     try:
         conn           = get_connection()
         airport_lookup = build_airport_lookup(conn)
     except Exception as e:
         return {
-            "filename": filename,
-            "error":    str(e),
+            "filename":        filename,
+            "error":           str(e),
             "events_inserted": 0,
             "rows_skipped":    0
         }
 
     log.info(f"  Worker started: [{file_number}/{total_files}] {filename}")
 
-    try:
-        # Read entire file into memory
-        # .gz files are read directly — no manual decompression
-        df = pd.read_csv(
-            filepath,
-            compression="gzip",
-            low_memory=False,
-            keep_default_na=False,
-            dtype=str
-        )
-        df.columns = [c.strip().lower() for c in df.columns]
-
-    except Exception as e:
-        conn.close()
-        return {
-            "filename": filename,
-            "error":    f"Failed to read file: {e}",
-            "events_inserted": 0,
-            "rows_skipped":    0
-        }
-
     now        = datetime.now(timezone.utc)
     batch_date = now.date()
 
-    all_events  = []
-    rows_skipped = 0
-
-    # Map every row to event tuples — collect all before inserting
-    for _, row in df.iterrows():
-        events = map_flight_to_events(
-            row=row.to_dict(),
+    try:
+        events_inserted, rows_skipped = copy_and_transform(
+            filepath=filepath,
+            conn=conn,
             airport_lookup=airport_lookup,
             now=now,
             batch_date=batch_date
         )
-        if events:
-            all_events.extend(events)
-        else:
-            rows_skipped += 1
-
-    # Bulk insert all events for this file in one operation
-    try:
-        events_inserted = insert_flight_events_bulk(all_events, conn)
     except Exception as e:
         conn.close()
         return {
-            "filename": filename,
-            "error":    f"Insert failed: {e}",
+            "filename":        filename,
+            "error":           f"Pipeline failed: {e}",
             "events_inserted": 0,
-            "rows_skipped":    rows_skipped
+            "rows_skipped":    0
         }
 
     conn.close()
 
-    # Mark this file as complete in the checkpoint
+    # Mark this file complete in the checkpoint so it is
+    # skipped on any future re-run of the script
     mark_checkpoint(filename)
 
     log.info(
@@ -430,7 +630,6 @@ def process_file(args: tuple) -> dict:
 
     return {
         "filename":        filename,
-        "total_rows":      len(df),
         "events_inserted": events_inserted,
         "rows_skipped":    rows_skipped
     }
@@ -503,7 +702,6 @@ def main():
         )
     )
 
-    import time
     start_time = time.time()
 
     # Run all files in parallel using a worker pool
@@ -511,14 +709,23 @@ def main():
     # Each worker processes one file at a time
     # When a worker finishes it picks up the next file
     with mp.Pool(processes=NUM_WORKERS) as pool:
-        results = pool.map(process_file, args)
+        for results in pool.imap_unordered(process_file, args):
+            print(results)
 
     duration_minutes = (time.time() - start_time) / 60
 
-    # Aggregate results from all workers
-    total_events_inserted = sum(r.get("events_inserted", 0) for r in results)
-    total_rows_skipped    = sum(r.get("rows_skipped",    0) for r in results)
-    failed_files          = [r for r in results if "error" in r]
+    # Safe aggregation — handles both dict results and unexpected strings
+    valid_results         = [r for r in results if isinstance(r, dict)]
+    bad_results           = [r for r in results if not isinstance(r, dict)]
+
+    total_events_inserted = sum(r.get("events_inserted", 0) for r in valid_results)
+    total_rows_skipped    = sum(r.get("rows_skipped",    0) for r in valid_results)
+    failed_files          = [r for r in valid_results if "error" in r]
+
+    # Log any workers that returned unexpected output
+    for bad in bad_results:
+        log.error(f"  Worker returned unexpected result: {bad}")
+        failed_files.append({"filename": "unknown", "error": str(bad)})
 
     log.info("\n" + "=" * 60)
     log.info("  Summary")
