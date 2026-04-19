@@ -120,10 +120,10 @@ POLL_INTERVAL_S  = 60       # Seconds between OpenSky API polls
 # Bounding box — Africa and Middle East
 # Format: min_lat, max_lat, min_lon, max_lon
 BOUNDING_BOX = {
-    "lamin":  4.0,   # Southern Nigeria (Niger Delta)
-    "lamax": 14.0,   # Northern Nigeria (Sokoto/Maiduguri)
-    "lomin":  2.7,   # Western Nigeria (Lagos/Badagry)
-    "lomax": 15.0,   # Eastern Nigeria (Lake Chad border)
+    "lamin": -35.0,   # Southern tip of Africa
+    "lamax":  37.0,   # North Africa / Mediterranean
+    "lomin": -17.0,   # West African Atlantic coast
+    "lomax":  60.0,   # Arabian Peninsula east coast
 }
 
 # State detection thresholds

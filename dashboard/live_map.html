@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Transit Radar 411 — Live Flight Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Header ─────────────────────────────────────────── */
+    header {
+      background: #1a1d27;
+      border-bottom: 1px solid #2d3148;
+      padding: 0 20px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+      z-index: 1000;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo {
+      width: 28px;
+      height: 28px;
+      background: #3266ad;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+    }
+
+    .header-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #f1f5f9;
+    }
+
+    .header-subtitle {
+      font-size: 12px;
+      color: #64748b;
+    }
+
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 500;
+      border: 1px solid #2d3148;
+    }
+
+    .status-badge.live {
+      background: rgba(29, 158, 117, 0.15);
+      color: #34d399;
+      border-color: rgba(29, 158, 117, 0.3);
+    }
+
+    .status-badge.offline {
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+
+    .pulse {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #34d399;
+      animation: pulse 2s infinite;
+    }
+
+    .pulse.offline { background: #f87171; animation: none; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.8); }
+    }
+
+    /* ── Stat bar ────────────────────────────────────────── */
+    .stat-bar {
+      background: #1a1d27;
+      border-bottom: 1px solid #2d3148;
+      padding: 0 20px;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      gap: 32px;
+      flex-shrink: 0;
+      overflow-x: auto;
+    }
+
+    .stat {
+      display: flex;
+      flex-direction: column;
+      white-space: nowrap;
+    }
+
+    .stat-label {
+      font-size: 10px;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .stat-value {
+      font-size: 16px;
+      font-weight: 600;
+      color: #f1f5f9;
+      line-height: 1.2;
+    }
+
+    .stat-value.green { color: #34d399; }
+    .stat-value.blue  { color: #60a5fa; }
+    .stat-value.amber { color: #fbbf24; }
+
+    .stat-divider {
+      width: 1px;
+      height: 28px;
+      background: #2d3148;
+      flex-shrink: 0;
+    }
+
+    /* ── Map container ───────────────────────────────────── */
+    #map {
+      flex: 1;
+      width: 100%;
+    }
+
+    /* ── Side panel ──────────────────────────────────────── */
+    .side-panel {
+      position: absolute;
+      top: 116px;
+      right: 16px;
+      width: 280px;
+      background: rgba(26, 29, 39, 0.95);
+      border: 1px solid #2d3148;
+      border-radius: 10px;
+      z-index: 1000;
+      overflow: hidden;
+      backdrop-filter: blur(8px);
+    }
+
+    .panel-header {
+      padding: 10px 14px;
+      border-bottom: 1px solid #2d3148;
+      font-size: 12px;
+      font-weight: 600;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .aircraft-list {
+      max-height: 360px;
+      overflow-y: auto;
+    }
+
+    .aircraft-item {
+      padding: 10px 14px;
+      border-bottom: 1px solid #1e2130;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .aircraft-item:hover { background: rgba(50, 102, 173, 0.15); }
+    .aircraft-item:last-child { border-bottom: none; }
+
+    .aircraft-callsign {
+      font-size: 13px;
+      font-weight: 600;
+      color: #f1f5f9;
+      margin-bottom: 3px;
+    }
+
+    .aircraft-detail {
+      font-size: 11px;
+      color: #64748b;
+      display: flex;
+      gap: 10px;
+    }
+
+    .event-badge {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .badge-CLIMBING   { background: rgba(52,211,153,0.2);  color: #34d399; }
+    .badge-DESCENDING { background: rgba(251,191,36,0.2);  color: #fbbf24; }
+    .badge-CRUISING   { background: rgba(96,165,250,0.2);  color: #60a5fa; }
+    .badge-DEPARTED   { background: rgba(167,139,250,0.2); color: #a78bfa; }
+    .badge-LANDED     { background: rgba(248,113,113,0.2); color: #f87171; }
+
+    /* ── Tooltip ─────────────────────────────────────────── */
+    .leaflet-tooltip {
+      background: #1a1d27 !important;
+      border: 1px solid #3266ad !important;
+      border-radius: 6px !important;
+      color: #f1f5f9 !important;
+      font-family: -apple-system, sans-serif !important;
+      font-size: 12px !important;
+      padding: 8px 12px !important;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4) !important;
+    }
+
+    .tooltip-callsign {
+      font-size: 13px;
+      font-weight: 700;
+      color: #60a5fa;
+      margin-bottom: 4px;
+    }
+
+    .tooltip-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      margin: 2px 0;
+    }
+
+    .tooltip-label { color: #64748b; }
+    .tooltip-value { color: #f1f5f9; font-weight: 500; }
+
+    /* ── Last updated ────────────────────────────────────── */
+    .last-updated {
+      position: absolute;
+      bottom: 24px;
+      left: 16px;
+      background: rgba(26, 29, 39, 0.9);
+      border: 1px solid #2d3148;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 11px;
+      color: #64748b;
+      z-index: 1000;
+    }
+
+    /* ── Legend ──────────────────────────────────────────── */
+    .legend {
+      position: absolute;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(26, 29, 39, 0.9);
+      border: 1px solid #2d3148;
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-size: 11px;
+      color: #94a3b8;
+      z-index: 1000;
+      display: flex;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <div class="logo">✈</div>
+    <div>
+      <div class="header-title">Transit Radar 411</div>
+      <div class="header-subtitle">Live flight intelligence — Africa & Middle East</div>
+    </div>
+  </div>
+  <div style="display: flex; align-items: center; gap: 12px;">
+    <div id="source-badge" style="font-size: 11px; color: #64748b;"></div>
+    <div id="status-badge" class="status-badge offline">
+      <div class="pulse offline" id="pulse-dot"></div>
+      <span id="status-text">Connecting...</span>
+    </div>
+  </div>
+</header>
+
+<div class="stat-bar">
+  <div class="stat">
+    <div class="stat-label">Aircraft tracked</div>
+    <div class="stat-value blue" id="stat-aircraft">—</div>
+  </div>
+  <div class="stat-divider"></div>
+  <div class="stat">
+    <div class="stat-label">Departures today</div>
+    <div class="stat-value green" id="stat-departures">—</div>
+  </div>
+  <div class="stat-divider"></div>
+  <div class="stat">
+    <div class="stat-label">Landings today</div>
+    <div class="stat-value" id="stat-landings">—</div>
+  </div>
+  <div class="stat-divider"></div>
+  <div class="stat">
+    <div class="stat-label">Cruising</div>
+    <div class="stat-value blue" id="stat-cruising">—</div>
+  </div>
+  <div class="stat-divider"></div>
+  <div class="stat">
+    <div class="stat-label">Enriched</div>
+    <div class="stat-value amber" id="stat-enriched">—</div>
+  </div>
+  <div class="stat-divider"></div>
+  <div class="stat">
+    <div class="stat-label">Refresh in</div>
+    <div class="stat-value" id="stat-countdown">10s</div>
+  </div>
+</div>
+
+<div id="map"></div>
+
+<!-- Side panel — aircraft list -->
+<div class="side-panel">
+  <div class="panel-header">
+    <span>Live aircraft</span>
+    <span id="aircraft-count" style="color: #60a5fa;">0</span>
+  </div>
+  <div class="aircraft-list" id="aircraft-list"></div>
+</div>
+
+<!-- Last updated -->
+<div class="last-updated" id="last-updated">Waiting for data...</div>
+
+<!-- Legend -->
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:#34d399"></div>Climbing</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#60a5fa"></div>Cruising</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#fbbf24"></div>Descending</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#a78bfa"></div>Departed</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#94a3b8"></div>Unknown</div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const API_BASE      = 'http://localhost:5000';
+  const REFRESH_MS    = 10000;
+
+  // ── Colour per event type ─────────────────────────────────
+  const EVENT_COLORS = {
+    CLIMBING:   '#34d399',
+    CRUISING:   '#60a5fa',
+    DESCENDING: '#fbbf24',
+    DEPARTED:   '#a78bfa',
+    LANDED:     '#f87171',
+    default:    '#94a3b8'
+  };
+
+  // ── Initialise Leaflet map ────────────────────────────────
+  // Centred on Nigeria / West Africa
+  const map = L.map('map', {
+    center: [9.0, 18.0],
+    zoom: 4,
+    zoomControl: true,
+    attributionControl: true
+  });
+
+  // Dark tile layer from CartoDB
+  L.tileLayer(
+    'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    {
+      attribution: '&copy; OpenStreetMap &copy; CartoDB',
+      subdomains: 'abcd',
+      maxZoom: 19
+    }
+  ).addTo(map);
+
+  // ── Aircraft marker store ─────────────────────────────────
+  // keyed by icao24 — holds {marker, data} for each aircraft
+  const aircraftMarkers = {};
+
+  // ── Create SVG aircraft icon ──────────────────────────────
+  function createAircraftIcon(color, heading) {
+    const rotation = (heading || 0) - 90;
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+        <g transform="rotate(${rotation}, 12, 12)">
+          <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"
+                fill="${color}" opacity="0.95"/>
+        </g>
+      </svg>`;
+    return L.divIcon({
+      html: svg,
+      className: '',
+      iconSize: [24, 24],
+      iconAnchor: [12, 12]
+    });
+  }
+
+  // ── Build tooltip HTML ────────────────────────────────────
+  function buildTooltip(ac) {
+    const alt = ac.altitude_ft
+      ? Math.round(ac.altitude_ft).toLocaleString() + ' ft'
+      : 'unknown';
+    const spd = ac.velocity_kmh
+      ? Math.round(ac.velocity_kmh) + ' km/h'
+      : 'unknown';
+    const hdg = ac.heading_deg
+      ? Math.round(ac.heading_deg) + '°'
+      : 'unknown';
+
+    return `
+      <div class="tooltip-callsign">${ac.callsign || ac.icao24}</div>
+      <div class="tooltip-row">
+        <span class="tooltip-label">ICAO24</span>
+        <span class="tooltip-value">${ac.icao24}</span>
+      </div>
+      <div class="tooltip-row">
+        <span class="tooltip-label">Status</span>
+        <span class="tooltip-value">${ac.event_type || '—'}</span>
+      </div>
+      <div class="tooltip-row">
+        <span class="tooltip-label">Altitude</span>
+        <span class="tooltip-value">${alt}</span>
+      </div>
+      <div class="tooltip-row">
+        <span class="tooltip-label">Speed</span>
+        <span class="tooltip-value">${spd}</span>
+      </div>
+      <div class="tooltip-row">
+        <span class="tooltip-label">Heading</span>
+        <span class="tooltip-value">${hdg}</span>
+      </div>`;
+  }
+
+  // ── Update or create marker for one aircraft ──────────────
+  function updateMarker(ac) {
+    if (!ac.latitude || !ac.longitude) return;
+
+    const color = EVENT_COLORS[ac.event_type] || EVENT_COLORS.default;
+    const icon  = createAircraftIcon(color, ac.heading_deg);
+    const latlng = [ac.latitude, ac.longitude];
+
+    if (aircraftMarkers[ac.icao24]) {
+      const existing = aircraftMarkers[ac.icao24];
+      existing.marker.setLatLng(latlng);
+      existing.marker.setIcon(icon);
+      existing.marker.setTooltipContent(buildTooltip(ac));
+      existing.data = ac;
+    } else {
+      const marker = L.marker(latlng, { icon })
+        .addTo(map)
+        .bindTooltip(buildTooltip(ac), {
+          permanent: false,
+          direction: 'top',
+          offset: [0, -14]
+        });
+      aircraftMarkers[ac.icao24] = { marker, data: ac };
+    }
+  }
+
+  // ── Remove markers for aircraft no longer in response ─────
+  function removeStaleMarkers(activeIcao24s) {
+    const activeSet = new Set(activeIcao24s);
+    for (const icao24 in aircraftMarkers) {
+      if (!activeSet.has(icao24)) {
+        map.removeLayer(aircraftMarkers[icao24].marker);
+        delete aircraftMarkers[icao24];
+      }
+    }
+  }
+
+  // ── Update side panel aircraft list ──────────────────────
+  function updateAircraftList(aircraft) {
+    const list  = document.getElementById('aircraft-list');
+    const count = document.getElementById('aircraft-count');
+    count.textContent = aircraft.length;
+
+    const sorted = [...aircraft].sort((a, b) =>
+      (b.altitude_ft || 0) - (a.altitude_ft || 0)
+    );
+
+    list.innerHTML = sorted.map(ac => {
+      const alt = ac.altitude_ft
+        ? Math.round(ac.altitude_ft / 100) * 100 + ' ft'
+        : '—';
+      const badge = ac.event_type
+        ? `<span class="event-badge badge-${ac.event_type}">${ac.event_type}</span>`
+        : '';
+      return `
+        <div class="aircraft-item" onclick="flyTo('${ac.icao24}')">
+          <div class="aircraft-callsign">
+            ${ac.callsign || ac.icao24}
+            &nbsp;${badge}
+          </div>
+          <div class="aircraft-detail">
+            <span>${ac.icao24}</span>
+            <span>${alt}</span>
+            <span>${ac.velocity_kmh ? Math.round(ac.velocity_kmh) + ' km/h' : ''}</span>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  // ── Fly map to clicked aircraft ───────────────────────────
+  function flyTo(icao24) {
+    const entry = aircraftMarkers[icao24];
+    if (entry) {
+      map.flyTo(entry.marker.getLatLng(), 7, { duration: 1.2 });
+      entry.marker.openTooltip();
+    }
+  }
+
+  // ── Fetch stats and update stat bar ──────────────────────
+  async function fetchStats() {
+    try {
+      const res  = await fetch(`${API_BASE}/api/stats`);
+      const data = await res.json();
+      document.getElementById('stat-departures').textContent = data.departures || 0;
+      document.getElementById('stat-landings').textContent   = data.landings   || 0;
+      document.getElementById('stat-cruising').textContent   = data.cruising   || 0;
+      document.getElementById('stat-enriched').textContent   = (data.enrichment_pct || 0) + '%';
+    } catch (e) {
+      // Stats not critical — fail silently
+    }
+  }
+
+  // ── Main fetch and update cycle ───────────────────────────
+  async function fetchPositions() {
+    try {
+      const res  = await fetch(`${API_BASE}/api/positions`);
+      const data = await res.json();
+
+      const aircraft = data.aircraft || [];
+
+      // Update all markers
+      for (const ac of aircraft) {
+        updateMarker(ac);
+      }
+
+      // Remove aircraft no longer in response
+      removeStaleMarkers(aircraft.map(ac => ac.icao24));
+
+      // Update aircraft list panel
+      updateAircraftList(aircraft);
+
+      // Update stat bar aircraft count
+      document.getElementById('stat-aircraft').textContent = aircraft.length;
+
+      // Update last updated timestamp
+      const now = new Date().toLocaleTimeString();
+      document.getElementById('last-updated').textContent =
+        `Last updated: ${now}`;
+
+      // Update data source badge
+      document.getElementById('source-badge').textContent =
+        `Source: ${data.source}`;
+
+      // Update status badge to live
+      const badge = document.getElementById('status-badge');
+      badge.className = 'status-badge live';
+      document.getElementById('pulse-dot').className = 'pulse';
+      document.getElementById('status-text').textContent =
+        `Live — ${aircraft.length} aircraft`;
+
+    } catch (e) {
+      // API unavailable
+      const badge = document.getElementById('status-badge');
+      badge.className = 'status-badge offline';
+      document.getElementById('pulse-dot').className = 'pulse offline';
+      document.getElementById('status-text').textContent = 'API offline';
+      document.getElementById('last-updated').textContent =
+        'API not reachable — run pipeline/api/app.py';
+    }
+  }
+
+  // ── Countdown timer ───────────────────────────────────────
+  let countdown = 10;
+  function updateCountdown() {
+    document.getElementById('stat-countdown').textContent = countdown + 's';
+    countdown--;
+    if (countdown < 0) {
+      countdown = 10;
+      fetchPositions();
+    }
+  }
+
+  // ── Initialise ────────────────────────────────────────────
+  fetchPositions();
+  fetchStats();
+  setInterval(updateCountdown, 1000);
+  setInterval(fetchStats, 60000);   // Stats refresh every minute
+</script>
+</body>
+</html>
