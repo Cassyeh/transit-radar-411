@@ -41,6 +41,7 @@ From any script in the project:
 
 import os
 import smtplib
+import ssl
 import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -55,7 +56,8 @@ log = logging.getLogger(__name__)
 # CONFIGURATION — read from .env
 # ─────────────────────────────────────────────────────────────
 SMTP_HOST      = "smtp.gmail.com"
-SMTP_PORT      = 587                          # TLS port for Gmail
+SMTP_PORT_TLS  = 587                          # TLS port for Gmail
+SMTP_PORT_SSL = 465
 EMAIL_SENDER   = os.getenv("EMAIL_SENDER")
 EMAIL_PASSWORD = os.getenv("EMAIL_APP_PASSWORD")
 EMAIL_RECIPIENT = os.getenv(
@@ -121,30 +123,37 @@ def send_email(subject: str, body: str, to: str = None) -> bool:
     message.attach(MIMEText(full_body, "plain"))
 
     try:
-        # Connect to Gmail SMTP server
-        # SMTP_SSL uses port 465, starttls uses port 587
-        # We use port 587 with starttls — the recommended approach
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+        try:
+            # Connect to Gmail SMTP server
+            # SMTP_SSL uses port 465, starttls uses port 587
+            # We use port 587 with starttls — the recommended approach
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT_TLS) as server:
 
-            # starttls() upgrades the connection to TLS encryption
-            # Must be called before login() to protect credentials
-            server.starttls()
+                # starttls() upgrades the connection to TLS encryption
+                # Must be called before login() to protect credentials
+                server.starttls()
 
-            # Log in with your Gmail address and App Password
-            # App Password is NOT your Gmail login password —
-            # it is a 16-character code generated specifically
-            # for programmatic access
-            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+                # Log in with your Gmail address and App Password
+                # App Password is NOT your Gmail login password —
+                # it is a 16-character code generated specifically
+                # for programmatic access
+                server.login(EMAIL_SENDER, EMAIL_PASSWORD)
 
-            # Send the email
-            server.sendmail(
-                EMAIL_SENDER,
-                recipient,
-                message.as_string()
-            )
+                # Send the email
+                server.sendmail(EMAIL_SENDER,recipient,message.as_string())
 
-        log.info(f"Email sent: '{subject}' → {recipient}")
-        return True
+            log.info(f"Email sent: '{subject}' → {recipient}")
+            return True
+        except (smtplib.SMTPException, OSError) as e:
+            log.warning(f"STARTTLS failed, trying SSL fallback: {e}")
+            # Attempt 2: SSL on port 465
+            #context = ssl._create_unverified_context()
+            context = ssl.create_default_context()
+            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT_SSL, context=context, timeout=30) as server:
+                server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+                server.sendmail(EMAIL_SENDER, recipient, message.as_string())
+            log.info(f"Email sent via SSL: '{subject}' → {recipient}")
+            return True
 
     except smtplib.SMTPAuthenticationError:
         log.error(

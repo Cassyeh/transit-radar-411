@@ -124,7 +124,8 @@ def start_kafka_consumer():
                 auto_offset_reset="latest",     # Only read new messages
                 enable_auto_commit=True,
                 group_id="live_map_consumer",
-                consumer_timeout_ms=5000        # Don't block forever
+                consumer_timeout_ms=5000,        # Don't block forever
+                api_version=(2, 8, 0)
             )
 
             kafka_available = True

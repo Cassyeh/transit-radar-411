@@ -98,28 +98,73 @@ services:
   # The job scheduler. Runs the end-of-day DAG at 23:59:59
   # that merges daily_flight_events into hist_flight_events.
   # ──────────────────────────────────────────
-  # airflow:
-  #   image: apache/airflow:2.8.0
-  #   container_name: airflow
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #   ports:
-  #     - "8080:8080"
-  #   environment:
-  #     AIRFLOW__CORE__EXECUTOR: LocalExecutor
-  #     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
-  #     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
-  #     AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
-  #     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-  #   volumes:
-  #     - ./airflow/dags:/opt/airflow/dags
-  #   command: >
-  #     bash -c "
-  #       airflow db migrate &&
-  #       airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@radar411.com &&
-  #       airflow webserver & airflow scheduler
-  #     "
+  airflow-init:
+    image: apache/airflow:2.8.0
+    container_name: airflow-init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+    entrypoint: >
+      bash -c "
+        airflow db migrate &&
+        airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@radar411.com || true
+      "
+  
+  airflow-webserver:
+    image: apache/airflow:2.8.0
+    container_name: airflow-webserver
+    restart: always
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    ports:
+      - "8080:8080"
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+      AIRFLOW__CORE__DEFAULT_TIMEZONE: "Africa/Lagos"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__LOGGING__REMOTE_LOGGING: "False"
+      AIRFLOW__LOGGING__LOG_FETCH_TIMEOUT_SEC: "5"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./utils:/opt/airflow/utils 
+      - airflow-logs:/opt/airflow/logs
+    command: webserver
+
+  airflow-scheduler:
+    image: apache/airflow:2.8.0
+    container_name: airflow-scheduler
+    restart: always
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+      AIRFLOW__CORE__DEFAULT_TIMEZONE: "Africa/Lagos"
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      EMAIL_SENDER: ${EMAIL_SENDER}
+      EMAIL_APP_PASSWORD: ${EMAIL_APP_PASSWORD}
+      EMAIL_RECIPIENT: ${EMAIL_RECIPIENT}
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./utils:/opt/airflow/utils 
+      - airflow-logs:/opt/airflow/logs
+    command: scheduler
 
   # ──────────────────────────────────────────
   # METABASE
@@ -150,3 +195,4 @@ services:
 volumes:
   postgres_data:
   pgadmin_data:
+  airflow-logs:
