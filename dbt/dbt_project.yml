@@ -1,0 +1,13 @@
+name: transit_radar_411
+version: '1.0.0'
+config-version: 2
+
+profile: transit_radar_411
+
+model-paths: ["models"]
+#source-paths: ["models"] `source-paths` config has been deprecated in favor of `model-paths`
+
+models:
+  transit_radar_411:
+    gold:
+      +materialized: table   #← build as a real table, not a view

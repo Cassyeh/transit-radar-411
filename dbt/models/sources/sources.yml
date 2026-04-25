@@ -1,0 +1,24 @@
+version: 2
+
+sources:
+  - name: public
+    description: Transit Radar 411 PostgreSQL database
+    database: "{{ env_var('POSTGRES_DB') }}"
+    schema: public
+    tables:
+      - name: hist_flight_events
+        description: Historical flight state change events
+      - name: hist_territory_crossings
+        description: Historical territory crossing records
+      - name: daily_flight_events
+        description: Today's flight state change events
+      - name: daily_territory_crossings
+        description: Today's territory crossing records
+      - name: dim_aircraft
+        description: Aircraft master reference table
+      - name: dim_airport
+        description: Airport reference table with coordinates
+      - name: dim_country
+        description: Country reference with PostGIS boundaries
+      - name: dim_state
+        description: State/province reference with PostGIS boundaries

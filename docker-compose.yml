@@ -167,6 +167,25 @@ services:
     command: scheduler
 
   # ──────────────────────────────────────────
+  # dbt
+  dbt:
+    image: ghcr.io/dbt-labs/dbt-postgres:1.7.0
+    container_name: dbt
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./dbt:/usr/app/dbt
+    working_dir: /usr/app/dbt
+    environment:
+      DBT_PROFILES_DIR: /usr/app/dbt
+      POSTGRES_DB: ${POSTGRES_DB}           
+      POSTGRES_USER: ${POSTGRES_USER}       
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD} 
+    profiles:
+      - dbt
+
+  # ──────────────────────────────────────────
   # METABASE
   # The dashboard. Connects to the Gold layer tables in Postgres
   # and lets you build visual reports without writing frontend code.

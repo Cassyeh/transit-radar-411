@@ -11,6 +11,9 @@ seeds/*.prj
 # ENV Passkeys
 .env
 
+#dbt
+*profiles.yml
+
 # Python
 __pycache__/
 *.py[cod]
