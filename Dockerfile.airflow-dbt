@@ -1,0 +1,12 @@
+# Custom Airflow image for Transit Radar 411.
+# Extends the official Apache Airflow 2.8.0 image with dbt-postgres
+# so the Airflow scheduler can run dbt commands as BashOperator tasks
+# without needing a separate Docker-in-Docker setup.
+#
+# Build once with:
+#   docker compose build
+#
+# After building, dbt is permanently baked into the image.
+# It does not reinstall on every container restart.
+FROM apache/airflow:2.8.0
+RUN pip install dbt-core==1.7.0 dbt-postgres==1.7.0

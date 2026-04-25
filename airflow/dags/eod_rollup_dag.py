@@ -18,7 +18,7 @@ ledger for tomorrow.
                                 ↓
 4. update_inflight_crossings
                                 ↓
-5. truncate_daily_tables
+5. truncate_daily_tables then dbt run
                                 ↓
 6. send_completion_email
 
@@ -58,6 +58,8 @@ Every night at 23:59:00 it runs six tasks in order:
         TRUNCATE daily_territory_crossings CASCADE
         Only runs if tasks 2 AND 3 both succeeded.
         Clears both daily tables for tomorrow.
+
+        dbt Task: Run dbt 
 
     Task 6: send_completion_email
         Sends a summary email with row counts, timing,
@@ -102,6 +104,8 @@ from airflow.exceptions import AirflowFailException
 from airflow.operators.python import PythonOperator
 from airflow.utils.dates import days_ago
 import pendulum
+
+from airflow.operators.bash import BashOperator
 
 import sys
 sys.path.append('/opt/airflow')
@@ -732,6 +736,11 @@ with DAG(
         python_callable=truncate_daily_tables,
     )
 
+    t_dbt = BashOperator(
+        task_id="dbt_run",
+        bash_command="dbt run --project-dir /opt/airflow/dbt --profiles-dir /opt/airflow/dbt",
+    )
+
     # ── Task 6: Send completion email ───────────────────────
     # trigger_rule=all_done means this task runs regardless
     # of whether earlier tasks succeeded or failed.
@@ -757,6 +766,8 @@ with DAG(
     #       ↓
     #   t5_truncate
     #       ↓
+    #   t_dbt
+    #       ↓
     #   t6_email
     #
     # t2 and t3 run in sequence after t1 completes.
@@ -767,4 +778,4 @@ with DAG(
     t1_validate >> t2_rollup_events >> t3_rollup_crossings >> t_reconcile
     t_reconcile >> t4_update_inflight
     t4_update_inflight >> t5_truncate
-    t5_truncate >> t6_email
+    t5_truncate >> t_dbt >> t6_email

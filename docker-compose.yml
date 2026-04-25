@@ -99,7 +99,9 @@ services:
   # that merges daily_flight_events into hist_flight_events.
   # ──────────────────────────────────────────
   airflow-init:
-    image: apache/airflow:2.8.0
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow-dbt
     container_name: airflow-init
     depends_on:
       postgres:
@@ -116,7 +118,9 @@ services:
       "
   
   airflow-webserver:
-    image: apache/airflow:2.8.0
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow-dbt
     container_name: airflow-webserver
     restart: always
     depends_on:
@@ -136,11 +140,14 @@ services:
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./utils:/opt/airflow/utils 
+      - ./dbt:/opt/airflow/dbt
       - airflow-logs:/opt/airflow/logs
     command: webserver
 
   airflow-scheduler:
-    image: apache/airflow:2.8.0
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow-dbt
     container_name: airflow-scheduler
     restart: always
     depends_on:
@@ -163,6 +170,7 @@ services:
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./utils:/opt/airflow/utils 
+      - ./dbt:/opt/airflow/dbt
       - airflow-logs:/opt/airflow/logs
     command: scheduler
 
