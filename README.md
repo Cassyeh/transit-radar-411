@@ -864,10 +864,7 @@ Built by **Ebube Cassandra Chigozie  Ijezie**
 ### Live Aircraft Map (`live_map.html`)
 
 > Real-time aircraft positions updating every 15 seconds over Africa and the Middle East.
-
-```
 ![Live Map](images/Live_map.png)
-```
 
 ---
 
@@ -875,9 +872,6 @@ Built by **Ebube Cassandra Chigozie  Ijezie**
 
 > The centrepiece of the frontend. Select any flight from the left panel to see its full crossing trail — every country and state it entered, when it crossed the border, how long it stayed, and where it is right now. The stat bar at the top shows live counts of flights tracked, total crossings, countries touched, and states touched.
 
-```
 ![Territory Crossing Map](images/Territory_map.png)
-```
----
 
 *Built on a $0 budget. Deployed on a laptop. Engineered like it's going to production.*
