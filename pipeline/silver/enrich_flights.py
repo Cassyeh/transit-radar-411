@@ -201,11 +201,25 @@ def get_opensky_token() -> str | None:
 def fetch_unenriched_aircraft(conn, today) -> list[str]:
     """
     Returns a list of unique icao24 values that have at least
-    one event today where origin_iata OR destination_iata is NULL.
-
-    We group by icao24 because one API call covers all events
-    for that aircraft for the day — no need to query per event.
-
+    one DEPARTED or LANDED event today where origin_iata OR
+    destination_iata is NULL.
+ 
+    WHY FILTER TO DEPARTED AND LANDED ONLY?
+    ----------------------------------------
+    CLIMBING, CRUISING and DESCENDING events are mid-flight —
+    they do not need origin or destination airport codes.
+    Only DEPARTED and LANDED events meaningfully use these
+    columns. Without this filter the count can reach 1,000+
+    aircraft which would exhaust the 4,000 daily OpenSky
+    credit limit in a single enrichment run.
+ 
+    With this filter the count typically drops to 100-300
+    aircraft — the actual number of flights that departed
+    or landed in your bounding box today.
+ 
+    One API call per icao24 covers all events for that
+    aircraft for the day regardless of how many events exist.
+ 
     Only looks at today's events — daily_flight_events is
     cleared every night by the Airflow EOD DAG.
     """
@@ -214,6 +228,7 @@ def fetch_unenriched_aircraft(conn, today) -> list[str]:
         SELECT DISTINCT icao24
         FROM daily_flight_events
         WHERE event_date = %s
+        AND   event_type IN ('DEPARTED', 'LANDED')
         AND (
             origin_iata      IS NULL
             OR destination_iata IS NULL
@@ -224,6 +239,7 @@ def fetch_unenriched_aircraft(conn, today) -> list[str]:
     cursor.close()
     result = [row[0] for row in rows]
     log.info(f"  Aircraft needing enrichment: {len(result):,}")
+    log.info(f"  (Filtered to DEPARTED/LANDED events only — conserves API credits)")
     return result
 
 

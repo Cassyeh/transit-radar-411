@@ -5,7 +5,7 @@
 -- Pre-aggregates the busiest flight routes from hist_flight_events
 -- into a Gold layer table that Metabase queries instantly.
 --
--- Without this model Metabase would run a GROUP BY on millions
+-- Without this model, Metabase would run a GROUP BY on millions
 -- of rows every time the Route Frequency dashboard loads.
 -- With this model Metabase reads a pre-built summary — instant.
 --

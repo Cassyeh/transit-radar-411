@@ -331,6 +331,104 @@ def stats():
         log.error(f"  Stats error: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/crossings")
+def get_crossings():
+    """
+    Returns all territory crossings from daily_territory_crossings
+    grouped by flight (icao24) for today.
+
+    Joins dim_country and dim_state to get centroid coordinates
+    for each territory so the map knows where to place each pin.
+
+    Called by territory_map.html every 15 seconds.
+    """
+    try:
+        conn   = psycopg2.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT
+                tc.icao24,
+                tc.callsign,
+                tc.crossing_id,
+                tc.territory_type,
+                tc.territory_id,
+                tc.territory_name,
+                tc.crossing_role,
+                tc.flight_status,
+                tc.entered_at,
+                tc.exited_at,
+                tc.duration_minutes,
+                CASE
+                    WHEN tc.territory_type = 'COUNTRY'
+                    THEN c.centroid_lat
+                    ELSE s.centroid_lat
+                END AS entered_lat,
+                CASE
+                    WHEN tc.territory_type = 'COUNTRY'
+                    THEN c.centroid_lon
+                    ELSE s.centroid_lon
+                END AS entered_lon
+            FROM daily_territory_crossings tc
+            LEFT JOIN dim_country c
+                ON  c.country_id      = tc.territory_id
+                AND tc.territory_type = 'COUNTRY'
+            LEFT JOIN dim_state s
+                ON  s.state_id        = tc.territory_id
+                AND tc.territory_type = 'STATE'
+            WHERE tc.entered_date = CURRENT_DATE
+            ORDER BY tc.icao24, tc.entered_at ASC
+        """)
+
+        rows    = cursor.fetchall()
+        columns = [
+            "icao24", "callsign", "crossing_id",
+            "territory_type", "territory_id", "territory_name",
+            "crossing_role", "flight_status",
+            "entered_at", "exited_at", "duration_minutes",
+            "entered_lat", "entered_lon"
+        ]
+        cursor.close()
+        conn.close()
+
+        # Group rows by icao24 into a flights list
+        flights_dict = {}
+        for row in rows:
+            d        = dict(zip(columns, row))
+            icao24   = d.pop("icao24")
+            callsign = d.pop("callsign")
+
+            # Convert datetime objects to ISO strings for JSON
+            for col in ["entered_at", "exited_at"]:
+                if d[col]:
+                    d[col] = d[col].isoformat()
+
+            # Convert Decimal/float columns for JSON serialisation
+            for col in ["duration_minutes", "entered_lat", "entered_lon"]:
+                if d[col] is not None:
+                    d[col] = float(d[col])
+
+            if icao24 not in flights_dict:
+                flights_dict[icao24] = {
+                    "icao24":    icao24,
+                    "callsign":  callsign or icao24,
+                    "crossings": []
+                }
+            flights_dict[icao24]["crossings"].append(d)
+
+        flights = list(flights_dict.values())
+
+        return jsonify({
+            "count":     len(flights),
+            "date":      str(__import__("datetime").date.today()),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "flights":   flights
+        })
+
+    except Exception as e:
+        log.error(f"  Crossings error: {e}")
+        return jsonify({"error": str(e), "flights": []}), 500
+
 
 # ─────────────────────────────────────────────────────────────
 # STARTUP

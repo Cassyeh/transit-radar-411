@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Transit Radar 411 — Territory Crossing Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    header {
+      background: #1a1d27;
+      border-bottom: 1px solid #2d3148;
+      padding: 0 20px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+      z-index: 1000;
+    }
+
+    .header-left { display: flex; align-items: center; gap: 12px; }
+
+    .logo {
+      width: 28px; height: 28px;
+      background: #1D9E75;
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px;
+    }
+
+    .header-title { font-size: 15px; font-weight: 600; color: #f1f5f9; }
+    .header-subtitle { font-size: 12px; color: #64748b; }
+
+    .stat-bar {
+      background: #1a1d27;
+      border-bottom: 1px solid #2d3148;
+      padding: 0 20px;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      gap: 28px;
+      flex-shrink: 0;
+      overflow-x: auto;
+    }
+
+    .stat { display: flex; flex-direction: column; white-space: nowrap; }
+    .stat-label { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.06em; }
+    .stat-value { font-size: 16px; font-weight: 600; color: #f1f5f9; line-height: 1.2; }
+    .stat-value.green { color: #34d399; }
+    .stat-value.blue  { color: #60a5fa; }
+    .stat-value.amber { color: #fbbf24; }
+    .stat-value.purple { color: #a78bfa; }
+    .stat-divider { width: 1px; height: 28px; background: #2d3148; flex-shrink: 0; }
+
+    #map { flex: 1; width: 100%; }
+
+    /* Flight selector panel */
+    .flight-panel {
+      position: absolute;
+      top: 116px;
+      left: 16px;
+      width: 260px;
+      background: rgba(26, 29, 39, 0.96);
+      border: 1px solid #2d3148;
+      border-radius: 10px;
+      z-index: 1000;
+      overflow: hidden;
+      backdrop-filter: blur(8px);
+      max-height: calc(100vh - 180px);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel-header {
+      padding: 10px 14px;
+      border-bottom: 1px solid #2d3148;
+      font-size: 12px; font-weight: 600;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      flex-shrink: 0;
+    }
+
+    .search-box {
+      padding: 8px 10px;
+      border-bottom: 1px solid #2d3148;
+      flex-shrink: 0;
+    }
+
+    .search-box input {
+      width: 100%;
+      background: #0f1117;
+      border: 1px solid #2d3148;
+      border-radius: 6px;
+      padding: 6px 10px;
+      color: #f1f5f9;
+      font-size: 12px;
+      outline: none;
+    }
+
+    .search-box input::placeholder { color: #64748b; }
+    .search-box input:focus { border-color: #1D9E75; }
+
+    .flight-list {
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .flight-item {
+      padding: 10px 14px;
+      border-bottom: 1px solid #1e2130;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .flight-item:hover { background: rgba(29, 158, 117, 0.12); }
+    .flight-item.active { background: rgba(29, 158, 117, 0.2); border-left: 3px solid #1D9E75; }
+    .flight-item:last-child { border-bottom: none; }
+
+    .flight-callsign { font-size: 13px; font-weight: 600; color: #f1f5f9; margin-bottom: 2px; }
+    .flight-detail { font-size: 11px; color: #64748b; }
+
+    /* Territory info panel */
+    .territory-panel {
+      position: absolute;
+      top: 116px;
+      right: 16px;
+      width: 270px;
+      background: rgba(26, 29, 39, 0.96);
+      border: 1px solid #2d3148;
+      border-radius: 10px;
+      z-index: 1000;
+      overflow: hidden;
+      backdrop-filter: blur(8px);
+      max-height: calc(100vh - 180px);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .crossing-list {
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .crossing-item {
+      padding: 10px 14px;
+      border-bottom: 1px solid #1e2130;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+
+    .crossing-item:last-child { border-bottom: none; }
+
+    .crossing-icon {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700;
+      flex-shrink: 0; margin-top: 2px;
+    }
+
+    .icon-START   { background: rgba(29,158,117,0.25); color: #34d399; border: 1px solid #1D9E75; }
+    .icon-ROUTE   { background: rgba(96,165,250,0.2);  color: #60a5fa; border: 1px solid #378ADD; }
+    .icon-END     { background: rgba(248,113,113,0.2); color: #f87171; border: 1px solid #E24B4A; }
+    .icon-CURRENT { background: rgba(167,139,250,0.3); color: #a78bfa; border: 2px solid #a78bfa; animation: glow 1.5s infinite; }
+
+    @keyframes glow {
+      0%, 100% { box-shadow: 0 0 4px rgba(167,139,250,0.4); }
+      50%       { box-shadow: 0 0 12px rgba(167,139,250,0.8); }
+    }
+
+    .crossing-body { flex: 1; min-width: 0; }
+    .crossing-name { font-size: 13px; font-weight: 600; color: #f1f5f9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .crossing-meta { font-size: 11px; color: #64748b; margin-top: 2px; }
+    .crossing-duration { font-size: 11px; color: #94a3b8; margin-top: 1px; }
+
+    .type-badge {
+      display: inline-block;
+      padding: 1px 5px; border-radius: 3px;
+      font-size: 10px; font-weight: 600;
+      margin-left: 4px;
+    }
+
+    .badge-COUNTRY { background: rgba(96,165,250,0.15); color: #60a5fa; }
+    .badge-STATE   { background: rgba(167,139,250,0.15); color: #a78bfa; }
+
+    .connector-line {
+      width: 2px; height: 12px;
+      background: #2d3148;
+      margin: 0 auto 0 13px;
+    }
+
+    .empty-state {
+      padding: 24px 16px;
+      text-align: center;
+      color: #64748b;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .last-updated {
+      position: absolute;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(26, 29, 39, 0.9);
+      border: 1px solid #2d3148;
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 11px;
+      color: #64748b;
+      z-index: 1000;
+      white-space: nowrap;
+    }
+
+    .legend {
+      position: absolute;
+      bottom: 24px;
+      right: 16px;
+      background: rgba(26, 29, 39, 0.9);
+      border: 1px solid #2d3148;
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 11px;
+      color: #94a3b8;
+      z-index: 1000;
+      line-height: 2;
+    }
+
+    .legend-row { display: flex; align-items: center; gap: 8px; }
+    .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+    .status-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: #34d399;
+      display: inline-block; margin-right: 6px;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .loading-overlay {
+      position: absolute; inset: 0;
+      background: rgba(15,17,23,0.7);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 2000;
+      font-size: 14px; color: #94a3b8;
+      flex-direction: column; gap: 12px;
+    }
+
+    .spinner {
+      width: 32px; height: 32px;
+      border: 3px solid #2d3148;
+      border-top-color: #1D9E75;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <div class="logo">🗺</div>
+    <div>
+      <div class="header-title">Transit Radar 411 — Territory Crossing Map</div>
+      <div class="header-subtitle">Daily territory crossings with live aircraft position</div>
+    </div>
+  </div>
+  <div style="font-size: 12px; color: #64748b;" id="header-status">
+    <span class="status-dot"></span>Live via Flask API
+  </div>
+</header>
+
+<div class="stat-bar">
+  <div class="stat">
+    <div class="stat-label">Flights today</div>
+    <div class="stat-value blue"  id="stat-flights">—</div>
+  </div>
+  <div class="stat-divider"></div>
+  <div class="stat">
+    <div class="stat-label">Total crossings</div>
+    <div class="stat-value green" id="stat-crossings">—</div>
+  </div>
+  <div class="stat-divider"></div>
+  <div class="stat">
+    <div class="stat-label">Countries touched</div>
+    <div class="stat-value amber" id="stat-countries">—</div>
+  </div>
+  <div class="stat-divider"></div>
+  <div class="stat">
+    <div class="stat-label">States touched</div>
+    <div class="stat-value purple" id="stat-states">—</div>
+  </div>
+  <div class="stat-divider"></div>
+  <div class="stat">
+    <div class="stat-label">Selected flight</div>
+    <div class="stat-value" id="stat-selected" style="font-size:13px;">none</div>
+  </div>
+</div>
+
+<div id="map">
+  <div class="loading-overlay" id="loading">
+    <div class="spinner"></div>
+    <span>Loading territory data...</span>
+  </div>
+</div>
+
+<!-- Left: Flight selector -->
+<div class="flight-panel">
+  <div class="panel-header">Flights today</div>
+  <div class="search-box">
+    <input type="text" id="flight-search" placeholder="Search callsign or icao24...">
+  </div>
+  <div class="flight-list" id="flight-list">
+    <div class="empty-state">Loading flights...</div>
+  </div>
+</div>
+
+<!-- Right: Territory crossing trail -->
+<div class="territory-panel">
+  <div class="panel-header" id="trail-header">Territory trail</div>
+  <div class="crossing-list" id="crossing-list">
+    <div class="empty-state">Select a flight to see its territory crossing trail.</div>
+  </div>
+</div>
+
+<!-- Bottom centre: last updated -->
+<div class="last-updated" id="last-updated">Connecting to API...</div>
+
+<!-- Bottom right: legend -->
+<div class="legend">
+  <div class="legend-row"><div class="legend-dot" style="background:#34d399"></div>Departure territory</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#60a5fa"></div>Route territory</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#f87171"></div>Arrival territory</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#a78bfa; box-shadow:0 0 6px #a78bfa"></div>Current position</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#fbbf24"></div>Country pin</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#e879f9"></div>State pin</div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const API_BASE    = 'http://localhost:5000';
+  const REFRESH_MS  = 15000;
+
+  // ── Map init ──────────────────────────────────────────────
+  const map = L.map('map', {
+    center: [9.0, 20.0],
+    zoom: 4,
+    zoomControl: true
+  });
+
+  L.tileLayer(
+    'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    { attribution: '© OpenStreetMap © CartoDB', subdomains: 'abcd', maxZoom: 19 }
+  ).addTo(map);
+
+  // ── State ─────────────────────────────────────────────────
+  let allFlights      = [];      // [{icao24, callsign, crossings:[]}]
+  let selectedIcao24  = null;
+  let mapLayers       = [];      // all drawn layers for selected flight
+  let aircraftMarker  = null;    // purple hovering plane
+  let livePositions   = {};      // icao24 -> {lat, lng, heading, event_type}
+
+  // ── Helpers ───────────────────────────────────────────────
+  function roleColor(role) {
+    if (role === 'START') return '#34d399';
+    if (role === 'END')   return '#f87171';
+    return '#60a5fa';
+  }
+
+  function typeColor(type) {
+    return type === 'STATE' ? '#e879f9' : '#fbbf24';
+  }
+
+  function fmtDuration(min) {
+    if (!min) return '—';
+    const h = Math.floor(min / 60);
+    const m = Math.round(min % 60);
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  }
+
+  function fmtTime(ts) {
+    if (!ts) return '—';
+    try {
+      return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch { return '—'; }
+  }
+
+  // ── Create aircraft SVG icon ──────────────────────────────
+  function aircraftIcon(heading) {
+    const rot = (heading || 0) - 90;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24">
+      <g transform="rotate(${rot},12,12)">
+        <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"
+              fill="#a78bfa" stroke="#7c3aed" stroke-width="0.5"/>
+      </g>
+    </svg>`;
+    return L.divIcon({ html: svg, className: '', iconSize: [28,28], iconAnchor: [14,14] });
+  }
+
+  // ── Territory pin icon ────────────────────────────────────
+  function pinIcon(color, label) {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 32 40">
+      <ellipse cx="16" cy="37" rx="6" ry="3" fill="rgba(0,0,0,0.3)"/>
+      <path d="M16 0 C8 0 2 6 2 14 C2 22 16 38 16 38 C16 38 30 22 30 14 C30 6 24 0 16 0Z"
+            fill="${color}" stroke="rgba(255,255,255,0.3)" stroke-width="1"/>
+      <text x="16" y="17" text-anchor="middle" dominant-baseline="middle"
+            font-family="monospace" font-size="9" font-weight="bold" fill="white">${label}</text>
+    </svg>`;
+    return L.divIcon({ html: svg, className: '', iconSize: [32,40], iconAnchor: [16,38] });
+  }
+
+  // ── Clear all map layers for selected flight ──────────────
+  function clearMapLayers() {
+    mapLayers.forEach(l => map.removeLayer(l));
+    mapLayers = [];
+    if (aircraftMarker) { map.removeLayer(aircraftMarker); aircraftMarker = null; }
+  }
+
+  // ── Draw territory crossing trail for selected flight ─────
+  function drawFlightTrail(flight) {
+    clearMapLayers();
+    if (!flight || !flight.crossings || flight.crossings.length === 0) return;
+
+    const crossings = flight.crossings;
+    const coords    = crossings
+      .filter(c => c.entered_lat && c.entered_lon)
+      .map(c => [parseFloat(c.entered_lat), parseFloat(c.entered_lon)]);
+
+    // Draw polyline connecting territory centroids
+    if (coords.length > 1) {
+      const line = L.polyline(coords, {
+        color: '#475569', weight: 2,
+        dashArray: '6 4', opacity: 0.7
+      }).addTo(map);
+      mapLayers.push(line);
+    }
+
+    // Draw a pin for each territory crossing
+    crossings.forEach((c, idx) => {
+      if (!c.entered_lat || !c.entered_lon) return;
+
+      const lat    = parseFloat(c.entered_lat);
+      const lon    = parseFloat(c.entered_lon);
+      const color  = c.crossing_role === 'START' ? '#34d399'
+                   : c.crossing_role === 'END'   ? '#f87171'
+                   : typeColor(c.territory_type);
+      const label  = c.crossing_role === 'START' ? 'DEP'
+                   : c.crossing_role === 'END'   ? 'ARR'
+                   : c.territory_type === 'STATE' ? 'ST'
+                   : 'CO';
+
+      const marker = L.marker([lat, lon], { icon: pinIcon(color, label) })
+        .addTo(map)
+        .bindTooltip(`
+          <div style="font-size:12px; line-height:1.6;">
+            <div style="font-weight:700; color:#f1f5f9; margin-bottom:4px;">
+              ${c.territory_name}
+              <span style="font-size:10px; padding:1px 5px; border-radius:3px; margin-left:4px;
+                background:${c.territory_type==='STATE'?'rgba(167,139,250,0.2)':'rgba(96,165,250,0.2)'};
+                color:${c.territory_type==='STATE'?'#a78bfa':'#60a5fa'};">
+                ${c.territory_type}
+              </span>
+            </div>
+            <div style="color:#94a3b8;">Role: ${c.crossing_role}</div>
+            <div style="color:#94a3b8;">Entered: ${fmtTime(c.entered_at)}</div>
+            ${c.duration_minutes ? `<div style="color:#94a3b8;">Duration: ${fmtDuration(c.duration_minutes)}</div>` : ''}
+          </div>
+        `, { permanent: false, direction: 'top', offset: [0, -40],
+             className: '' });
+
+      mapLayers.push(marker);
+    });
+
+    // Place hovering aircraft marker at current live position
+    const live = livePositions[flight.icao24];
+    if (live && live.lat && live.lon) {
+      aircraftMarker = L.marker([live.lat, live.lon], {
+        icon: aircraftIcon(live.heading),
+        zIndexOffset: 1000
+      }).addTo(map)
+        .bindTooltip(`
+          <div style="font-size:12px;">
+            <div style="font-weight:700; color:#a78bfa; margin-bottom:4px;">
+              ${flight.callsign || flight.icao24} — CURRENT POSITION
+            </div>
+            <div style="color:#94a3b8;">Alt: ${live.altitude_ft ? Math.round(live.altitude_ft).toLocaleString() + ' ft' : '—'}</div>
+            <div style="color:#94a3b8;">Speed: ${live.velocity_kmh ? Math.round(live.velocity_kmh) + ' km/h' : '—'}</div>
+            <div style="color:#94a3b8;">Status: ${live.event_type || '—'}</div>
+          </div>
+        `, { permanent: false, direction: 'top', offset: [0,-16] });
+
+      mapLayers.push(aircraftMarker);
+    }
+
+    // Fit map to show all pins
+    if (coords.length > 0) {
+      const bounds = live
+        ? L.latLngBounds([...coords, [live.lat, live.lon]])
+        : L.latLngBounds(coords);
+      map.fitBounds(bounds.pad(0.15));
+    }
+  }
+
+  // ── Render territory crossing list (right panel) ──────────
+  function renderCrossingList(flight) {
+    const list   = document.getElementById('crossing-list');
+    const header = document.getElementById('trail-header');
+
+    if (!flight) {
+      header.textContent = 'Territory trail';
+      list.innerHTML = '<div class="empty-state">Select a flight to see its territory crossing trail.</div>';
+      return;
+    }
+
+    header.textContent = `Trail — ${flight.callsign || flight.icao24}`;
+    const crossings = flight.crossings || [];
+
+    if (crossings.length === 0) {
+      list.innerHTML = '<div class="empty-state">No territory crossings recorded for this flight yet.</div>';
+      return;
+    }
+
+    list.innerHTML = crossings.map((c, idx) => {
+      const isLast    = idx === crossings.length - 1;
+      const isCurrent = c.flight_status === 'IN_PROGRESS' && !c.exited_at;
+      const iconClass = isCurrent ? 'icon-CURRENT' : `icon-${c.crossing_role}`;
+      const iconLabel = isCurrent ? '✈' : c.crossing_role === 'START' ? 'S' : c.crossing_role === 'END' ? 'E' : '·';
+
+      return `
+        <div class="crossing-item">
+          <div>
+            <div class="crossing-icon ${iconClass}">${iconLabel}</div>
+            ${!isLast ? '<div class="connector-line"></div>' : ''}
+          </div>
+          <div class="crossing-body">
+            <div class="crossing-name">
+              ${c.territory_name}
+              <span class="type-badge badge-${c.territory_type}">${c.territory_type}</span>
+              ${isCurrent ? '<span style="font-size:10px;color:#a78bfa;margin-left:4px;">● LIVE</span>' : ''}
+            </div>
+            <div class="crossing-meta">
+              ${c.crossing_role} · ${fmtTime(c.entered_at)}
+              ${c.exited_at ? ' → ' + fmtTime(c.exited_at) : ''}
+            </div>
+            ${c.duration_minutes ? `<div class="crossing-duration">${fmtDuration(c.duration_minutes)}</div>` : ''}
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  // ── Render flight list (left panel) ──────────────────────
+  function renderFlightList(filter) {
+    const list    = document.getElementById('flight-list');
+    const filtered = filter
+      ? allFlights.filter(f =>
+          (f.callsign || '').toLowerCase().includes(filter) ||
+          f.icao24.toLowerCase().includes(filter)
+        )
+      : allFlights;
+
+    if (filtered.length === 0) {
+      list.innerHTML = '<div class="empty-state">No flights found.</div>';
+      return;
+    }
+
+    list.innerHTML = filtered.map(f => `
+      <div class="flight-item ${f.icao24 === selectedIcao24 ? 'active' : ''}"
+           onclick="selectFlight('${f.icao24}')">
+        <div class="flight-callsign">${f.callsign || f.icao24}</div>
+        <div class="flight-detail">
+          ${f.icao24} · ${f.crossings.length} crossing${f.crossings.length !== 1 ? 's' : ''}
+          ${livePositions[f.icao24] ? ' · <span style="color:#a78bfa">● live</span>' : ''}
+        </div>
+      </div>
+    `).join('');
+  }
+
+  // ── Select a flight ───────────────────────────────────────
+  function selectFlight(icao24) {
+    selectedIcao24 = icao24;
+    const flight   = allFlights.find(f => f.icao24 === icao24);
+    document.getElementById('stat-selected').textContent =
+      flight ? (flight.callsign || icao24) : 'none';
+    renderFlightList(document.getElementById('flight-search').value.toLowerCase());
+    renderCrossingList(flight);
+    drawFlightTrail(flight);
+  }
+
+  // ── Fetch territory crossings from API ────────────────────
+  async function fetchCrossings() {
+    try {
+      const res  = await fetch(`${API_BASE}/api/crossings`);
+      const data = await res.json();
+      return data.flights || [];
+    } catch (e) {
+      // Fallback — query crossings via stats endpoint or show error
+      document.getElementById('last-updated').textContent =
+        'API offline — run pipeline/api/app.py and add /api/crossings endpoint';
+      return [];
+    }
+  }
+
+  // ── Fetch live positions ──────────────────────────────────
+  async function fetchPositions() {
+    try {
+      const res  = await fetch(`${API_BASE}/api/positions`);
+      const data = await res.json();
+      livePositions = {};
+      (data.aircraft || []).forEach(ac => {
+        livePositions[ac.icao24] = {
+          lat:        ac.latitude,
+          lon:        ac.longitude,
+          heading:    ac.heading_deg,
+          altitude_ft: ac.altitude_ft,
+          velocity_kmh: ac.velocity_kmh,
+          event_type: ac.event_type
+        };
+      });
+    } catch (e) { /* non-critical */ }
+  }
+
+  // ── Update stats bar ──────────────────────────────────────
+  function updateStats(flights) {
+    const totalCrossings = flights.reduce((s, f) => s + f.crossings.length, 0);
+    const countries = new Set(
+      flights.flatMap(f => f.crossings
+        .filter(c => c.territory_type === 'COUNTRY')
+        .map(c => c.territory_name))
+    ).size;
+    const states = new Set(
+      flights.flatMap(f => f.crossings
+        .filter(c => c.territory_type === 'STATE')
+        .map(c => c.territory_name))
+    ).size;
+
+    document.getElementById('stat-flights').textContent   = flights.length;
+    document.getElementById('stat-crossings').textContent = totalCrossings;
+    document.getElementById('stat-countries').textContent = countries;
+    document.getElementById('stat-states').textContent    = states;
+  }
+
+  // ── Main refresh cycle ────────────────────────────────────
+  async function refresh() {
+    await fetchPositions();
+    const flights = await fetchCrossings();
+
+    allFlights = flights;
+    updateStats(flights);
+    renderFlightList(document.getElementById('flight-search').value.toLowerCase());
+
+    // Re-draw selected flight with updated live position
+    if (selectedIcao24) {
+      const flight = allFlights.find(f => f.icao24 === selectedIcao24);
+      if (flight) {
+        renderCrossingList(flight);
+        drawFlightTrail(flight);
+      }
+    }
+
+    document.getElementById('last-updated').textContent =
+      `Last updated: ${new Date().toLocaleTimeString()}`;
+    document.getElementById('loading').style.display = 'none';
+  }
+
+  // ── Search box ────────────────────────────────────────────
+  document.getElementById('flight-search').addEventListener('input', e => {
+    renderFlightList(e.target.value.toLowerCase());
+  });
+
+  // ── Start ─────────────────────────────────────────────────
+  refresh();
+  setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>
