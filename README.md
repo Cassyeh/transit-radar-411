@@ -629,7 +629,8 @@ Run the test suite with:
 
 ```cmd
 pip install pytest python-dotenv psycopg2-binary
-pytest tests/test_pipeline.py -v
+pytest tests/test_pipeline.py -v OR 
+python -m pytest tests/test_pipeline.py -v
 ```
 
 Tests cover:
